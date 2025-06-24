@@ -40,7 +40,12 @@ export const useTradeReplays = () => {
         variant: "destructive",
       });
     } else {
-      setTrades(data || []);
+      // Type cast the data to ensure tag property matches our interface
+      const typedTrades = (data || []).map(trade => ({
+        ...trade,
+        tag: trade.tag as 'win' | 'mistake' | 'learning'
+      }));
+      setTrades(typedTrades);
     }
     setLoading(false);
   };
