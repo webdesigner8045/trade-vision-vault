@@ -7,18 +7,27 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, Clock, FileText, Tag } from 'lucide-react';
+import { Calendar, Clock, FileText, Tag, Upload } from 'lucide-react';
+import { useTradeReplays } from '@/hooks/useTradeReplays';
 
-const TradeReplayForm = () => {
+interface TradeReplayFormProps {
+  onTradeCreated?: () => void;
+}
+
+const TradeReplayForm: React.FC<TradeReplayFormProps> = ({ onTradeCreated }) => {
   const [formData, setFormData] = useState({
     instrument: '',
-    date: '',
-    entryPrice: '',
-    exitPrice: '',
-    tag: '',
+    trade_date: '',
+    trade_time: '',
+    entry_price: '',
+    exit_price: '',
+    tag: '' as 'win' | 'mistake' | 'learning' | '',
     notes: '',
     file: null as File | null
   });
+  const [uploading, setUploading] = useState(false);
+
+  const { createTrade, uploadFile } = useTradeReplays();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -26,10 +35,53 @@ const TradeReplayForm = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Form submitted:', formData);
-    // Here you would typically send the data to your backend
+    setUploading(true);
+
+    try {
+      let fileUrl = null;
+      if (formData.file) {
+        fileUrl = await uploadFile(formData.file);
+      }
+
+      const tradeData = {
+        instrument: formData.instrument,
+        trade_date: formData.trade_date,
+        trade_time: formData.trade_time || undefined,
+        entry_price: parseFloat(formData.entry_price),
+        exit_price: parseFloat(formData.exit_price),
+        tag: formData.tag as 'win' | 'mistake' | 'learning',
+        notes: formData.notes || undefined,
+        recording_url: fileUrl || undefined,
+      };
+
+      const result = await createTrade(tradeData);
+      
+      if (result) {
+        // Reset form
+        setFormData({
+          instrument: '',
+          trade_date: '',
+          trade_time: '',
+          entry_price: '',
+          exit_price: '',
+          tag: '',
+          notes: '',
+          file: null
+        });
+        
+        // Reset file input
+        const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+        if (fileInput) fileInput.value = '';
+        
+        onTradeCreated?.();
+      }
+    } catch (error) {
+      console.error('Error creating trade:', error);
+    }
+
+    setUploading(false);
   };
 
   const getTagColor = (tag: string) => {
@@ -61,6 +113,7 @@ const TradeReplayForm = () => {
                   value={formData.instrument}
                   onChange={(e) => setFormData({ ...formData, instrument: e.target.value })}
                   className="bg-gray-900/50 border-gray-600 text-white placeholder-gray-400"
+                  required
                 />
               </div>
               
@@ -71,11 +124,25 @@ const TradeReplayForm = () => {
                 </Label>
                 <Input
                   type="date"
-                  value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  value={formData.trade_date}
+                  onChange={(e) => setFormData({ ...formData, trade_date: e.target.value })}
                   className="bg-gray-900/50 border-gray-600 text-white"
+                  required
                 />
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-gray-300 flex items-center">
+                <Clock className="w-4 h-4 mr-1" />
+                Trade Time (Optional)
+              </Label>
+              <Input
+                type="time"
+                value={formData.trade_time}
+                onChange={(e) => setFormData({ ...formData, trade_time: e.target.value })}
+                className="bg-gray-900/50 border-gray-600 text-white"
+              />
             </div>
 
             {/* Price Info */}
@@ -86,9 +153,10 @@ const TradeReplayForm = () => {
                   type="number"
                   step="0.00001"
                   placeholder="0.00000"
-                  value={formData.entryPrice}
-                  onChange={(e) => setFormData({ ...formData, entryPrice: e.target.value })}
+                  value={formData.entry_price}
+                  onChange={(e) => setFormData({ ...formData, entry_price: e.target.value })}
                   className="bg-gray-900/50 border-gray-600 text-white placeholder-gray-400"
+                  required
                 />
               </div>
               
@@ -98,9 +166,10 @@ const TradeReplayForm = () => {
                   type="number"
                   step="0.00001"
                   placeholder="0.00000"
-                  value={formData.exitPrice}
-                  onChange={(e) => setFormData({ ...formData, exitPrice: e.target.value })}
+                  value={formData.exit_price}
+                  onChange={(e) => setFormData({ ...formData, exit_price: e.target.value })}
                   className="bg-gray-900/50 border-gray-600 text-white placeholder-gray-400"
+                  required
                 />
               </div>
             </div>
@@ -111,7 +180,7 @@ const TradeReplayForm = () => {
                 <Tag className="w-4 h-4 mr-1" />
                 Trade Outcome
               </Label>
-              <Select value={formData.tag} onValueChange={(value) => setFormData({ ...formData, tag: value })}>
+              <Select value={formData.tag} onValueChange={(value) => setFormData({ ...formData, tag: value as 'win' | 'mistake' | 'learning' })}>
                 <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white">
                   <SelectValue placeholder="Select outcome" />
                 </SelectTrigger>
@@ -157,7 +226,7 @@ const TradeReplayForm = () => {
                 />
                 <label htmlFor="file-upload" className="cursor-pointer">
                   <div className="flex flex-col items-center space-y-2">
-                    <Clock className="w-8 h-8 text-gray-400" />
+                    <Upload className="w-8 h-8 text-gray-400" />
                     <div className="text-gray-300">
                       {formData.file ? formData.file.name : 'Upload recording or chart'}
                     </div>
@@ -181,8 +250,8 @@ const TradeReplayForm = () => {
             </div>
 
             {/* Submit Button */}
-            <Button type="submit" className="w-full bg-green-600 hover:bg-green-700">
-              Save Trade Replay
+            <Button type="submit" className="w-full bg-green-600 hover:bg-green-700" disabled={uploading}>
+              {uploading ? 'Saving...' : 'Save Trade Replay'}
             </Button>
           </form>
         </CardContent>

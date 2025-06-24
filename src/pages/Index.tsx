@@ -1,29 +1,44 @@
 
 import React, { useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import AuthPage from '@/components/AuthPage';
 import Header from '@/components/Header';
 import Dashboard from '@/components/Dashboard';
 import Timeline from '@/components/Timeline';
 import TradeReplayForm from '@/components/TradeReplayForm';
 
 const Index = () => {
+  const { user, loading } = useAuth();
   const [currentView, setCurrentView] = useState<'dashboard' | 'timeline' | 'form'>('dashboard');
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
+        <div className="text-white">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPage />;
+  }
 
   const renderContent = () => {
     switch (currentView) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onNewReplay={() => setCurrentView('form')} />;
       case 'timeline':
         return <Timeline />;
       case 'form':
-        return <TradeReplayForm />;
+        return <TradeReplayForm onTradeCreated={() => setCurrentView('dashboard')} />;
       default:
-        return <Dashboard />;
+        return <Dashboard onNewReplay={() => setCurrentView('form')} />;
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
-      <Header />
+      <Header onNewReplay={() => setCurrentView('form')} />
       
       {/* Navigation */}
       <div className="border-b border-gray-700 bg-gray-900/50">
@@ -67,15 +82,6 @@ const Index = () => {
       <main className="flex-1">
         {renderContent()}
       </main>
-
-      {/* Footer with Supabase Integration Notice */}
-      <footer className="border-t border-gray-700 bg-gray-900/80 p-4">
-        <div className="text-center text-sm text-gray-400">
-          <p>Ready to add authentication and data persistence? 
-            <span className="text-green-400 ml-1">Connect to Supabase using the button in the top right.</span>
-          </p>
-        </div>
-      </footer>
     </div>
   );
 };

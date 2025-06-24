@@ -1,9 +1,16 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { FileText, Calendar, TrendingUp } from 'lucide-react';
+import { FileText, Calendar, TrendingUp, LogOut, User } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
-const Header = () => {
+interface HeaderProps {
+  onNewReplay?: () => void;
+}
+
+const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
+  const { user, signOut } = useAuth();
+
   return (
     <header className="bg-gray-900/80 backdrop-blur-sm border-b border-gray-700 px-6 py-4">
       <div className="flex items-center justify-between">
@@ -14,29 +21,25 @@ const Header = () => {
             </div>
             <span className="text-xl font-bold text-white">Replay Locker</span>
           </div>
-          
-          <nav className="flex items-center space-x-6">
-            <Button variant="ghost" className="text-gray-300 hover:text-white">
-              Dashboard
-            </Button>
-            <Button variant="ghost" className="text-gray-300 hover:text-white">
-              <Calendar className="w-4 h-4 mr-2" />
-              Timeline
-            </Button>
-            <Button variant="ghost" className="text-gray-300 hover:text-white">
-              Analytics
-            </Button>
-          </nav>
         </div>
 
         <div className="flex items-center space-x-4">
-          <Button className="bg-green-600 hover:bg-green-700">
-            <FileText className="w-4 h-4 mr-2" />
-            New Replay
-          </Button>
-          <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800">
-            Settings
-          </Button>
+          {user && (
+            <>
+              <div className="flex items-center space-x-2 text-gray-300">
+                <User className="w-4 h-4" />
+                <span className="text-sm">{user.email}</span>
+              </div>
+              <Button className="bg-green-600 hover:bg-green-700" onClick={onNewReplay}>
+                <FileText className="w-4 h-4 mr-2" />
+                New Replay
+              </Button>
+              <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800" onClick={signOut}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </header>
