@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, Clock, FileText, Tag, Upload } from 'lucide-react';
+import { Calendar, Clock, FileText, Tag, Upload, X, Image, Video } from 'lucide-react';
 import { useTradeReplays } from '@/hooks/useTradeReplays';
 
 interface TradeReplayFormProps {
@@ -26,13 +26,38 @@ const TradeReplayForm: React.FC<TradeReplayFormProps> = ({ onTradeCreated }) => 
     file: null as File | null
   });
   const [uploading, setUploading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const { createTrade, uploadFile } = useTradeReplays();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFormData({ ...formData, file: e.target.files[0] });
+      const file = e.target.files[0];
+      setFormData({ ...formData, file });
+      
+      // Create preview URL for the file
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
     }
+  };
+
+  const removeFile = () => {
+    setFormData({ ...formData, file: null });
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+    // Reset file input
+    const fileInput = document.getElementById('file-upload') as HTMLInputElement;
+    if (fileInput) fileInput.value = '';
+  };
+
+  const isVideoFile = (file: File) => {
+    return file.type.startsWith('video/');
+  };
+
+  const isImageFile = (file: File) => {
+    return file.type.startsWith('image/');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,6 +95,12 @@ const TradeReplayForm: React.FC<TradeReplayFormProps> = ({ onTradeCreated }) => 
           notes: '',
           file: null
         });
+        
+        // Clean up preview
+        if (previewUrl) {
+          URL.revokeObjectURL(previewUrl);
+          setPreviewUrl(null);
+        }
         
         // Reset file input
         const fileInput = document.getElementById('file-upload') as HTMLInputElement;
@@ -216,26 +247,75 @@ const TradeReplayForm: React.FC<TradeReplayFormProps> = ({ onTradeCreated }) => 
             {/* File Upload */}
             <div className="space-y-2">
               <Label className="text-gray-300">Screen Recording / Chart</Label>
-              <div className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:border-gray-500 transition-colors">
-                <input
-                  type="file"
-                  accept="video/*,image/*"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  id="file-upload"
-                />
-                <label htmlFor="file-upload" className="cursor-pointer">
-                  <div className="flex flex-col items-center space-y-2">
-                    <Upload className="w-8 h-8 text-gray-400" />
-                    <div className="text-gray-300">
-                      {formData.file ? formData.file.name : 'Upload recording or chart'}
+              
+              {/* File Preview */}
+              {formData.file && previewUrl && (
+                <div className="relative mb-4">
+                  <div className="flex items-center justify-between p-2 bg-gray-700/50 rounded-lg border border-gray-600">
+                    <div className="flex items-center space-x-2">
+                      {isVideoFile(formData.file) ? (
+                        <Video className="w-5 h-5 text-blue-400" />
+                      ) : isImageFile(formData.file) ? (
+                        <Image className="w-5 h-5 text-green-400" />
+                      ) : (
+                        <FileText className="w-5 h-5 text-gray-400" />
+                      )}
+                      <span className="text-sm text-gray-300">{formData.file.name}</span>
                     </div>
-                    <div className="text-sm text-gray-500">
-                      Video files or screenshots accepted
-                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={removeFile}
+                      className="text-gray-400 hover:text-red-400"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
                   </div>
-                </label>
-              </div>
+                  
+                  {/* Preview Content */}
+                  <div className="mt-2">
+                    {isVideoFile(formData.file) ? (
+                      <video 
+                        src={previewUrl} 
+                        controls 
+                        className="w-full max-w-sm rounded-lg border border-gray-600"
+                        preload="metadata"
+                      />
+                    ) : isImageFile(formData.file) ? (
+                      <img 
+                        src={previewUrl} 
+                        alt="Preview"
+                        className="w-full max-w-sm rounded-lg border border-gray-600"
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              )}
+
+              {/* Upload Area */}
+              {!formData.file && (
+                <div className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:border-gray-500 transition-colors">
+                  <input
+                    type="file"
+                    accept="video/*,image/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                    id="file-upload"
+                  />
+                  <label htmlFor="file-upload" className="cursor-pointer">
+                    <div className="flex flex-col items-center space-y-2">
+                      <Upload className="w-8 h-8 text-gray-400" />
+                      <div className="text-gray-300">
+                        Upload recording or chart
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        Video files or screenshots accepted
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
             </div>
 
             {/* Notes */}

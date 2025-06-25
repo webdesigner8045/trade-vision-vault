@@ -1,11 +1,10 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Calendar, TrendingUp, TrendingDown, Tag, FileText, Clock, Play, ExternalLink } from 'lucide-react';
+import { Calendar, TrendingUp, TrendingDown, Tag, FileText, Clock, Play, ExternalLink, Image, Video } from 'lucide-react';
 import { useTradeReplays } from '@/hooks/useTradeReplays';
 
 const Timeline = () => {
@@ -43,6 +42,14 @@ const Timeline = () => {
       return pnl.toFixed(0);
     }
     return trade.instrument.includes('JPY') ? (pnl * 100).toFixed(0) : (pnl * 10000).toFixed(0);
+  };
+
+  const isVideoFile = (url: string) => {
+    return url.match(/\.(mp4|webm|ogg|mov|avi)$/i);
+  };
+
+  const isImageFile = (url: string) => {
+    return url.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i);
   };
 
   return (
@@ -119,8 +126,22 @@ const Timeline = () => {
                         </div>
                         {trade.recording_url && (
                           <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30" variant="outline">
-                            <Play className="w-3 h-3 mr-1" />
-                            Recording
+                            {isVideoFile(trade.recording_url) ? (
+                              <>
+                                <Video className="w-3 h-3 mr-1" />
+                                Video
+                              </>
+                            ) : isImageFile(trade.recording_url) ? (
+                              <>
+                                <Image className="w-3 h-3 mr-1" />
+                                Image
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-3 h-3 mr-1" />
+                                File
+                              </>
+                            )}
                           </Badge>
                         )}
                       </div>
@@ -155,6 +176,36 @@ const Timeline = () => {
                         <p className="text-gray-300 leading-relaxed mb-4">{trade.notes}</p>
                       )}
                       
+                      {/* Media Display */}
+                      {trade.recording_url && (
+                        <div className="mb-4">
+                          {isVideoFile(trade.recording_url) ? (
+                            <video 
+                              controls 
+                              className="w-full max-w-md rounded-lg border border-gray-600"
+                              preload="metadata"
+                            >
+                              <source src={trade.recording_url} />
+                              Your browser does not support the video tag.
+                            </video>
+                          ) : isImageFile(trade.recording_url) ? (
+                            <img 
+                              src={trade.recording_url} 
+                              alt="Trade chart or screenshot"
+                              className="w-full max-w-md rounded-lg border border-gray-600 cursor-pointer hover:opacity-90 transition-opacity"
+                              onClick={() => window.open(trade.recording_url, '_blank')}
+                            />
+                          ) : (
+                            <div className="p-4 bg-gray-700/50 rounded-lg border border-gray-600 max-w-md">
+                              <div className="flex items-center space-x-2 text-gray-300">
+                                <FileText className="w-5 h-5" />
+                                <span>Uploaded file</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
                       <div className="flex space-x-2">
                         {trade.recording_url && (
                           <Button 
@@ -164,7 +215,7 @@ const Timeline = () => {
                             onClick={() => window.open(trade.recording_url, '_blank')}
                           >
                             <ExternalLink className="w-4 h-4 mr-1" />
-                            View Recording
+                            Open in New Tab
                           </Button>
                         )}
                       </div>
