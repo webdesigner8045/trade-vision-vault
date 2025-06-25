@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +15,7 @@ const Timeline = () => {
 
   if (loading) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         <div className="text-center text-gray-400">Loading your trades...</div>
       </div>
     );
@@ -53,12 +54,12 @@ const Timeline = () => {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6 max-w-full">
       {/* Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-white">Trade Timeline</h1>
-          <p className="text-gray-400">Chronological view of all your trades</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-white">Trade Timeline</h1>
+          <p className="text-gray-400 text-sm sm:text-base">Chronological view of all your trades</p>
         </div>
       </div>
 
@@ -68,10 +69,10 @@ const Timeline = () => {
           placeholder="Search trades..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="bg-gray-900/50 border-gray-600 text-white placeholder-gray-400 max-w-xs"
+          className="bg-gray-900/50 border-gray-600 text-white placeholder-gray-400 w-full sm:max-w-xs"
         />
         <Select value={filterTag} onValueChange={setFilterTag}>
-          <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white max-w-xs">
+          <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white w-full sm:max-w-xs">
             <SelectValue placeholder="Filter by tag" />
           </SelectTrigger>
           <SelectContent className="bg-gray-800 border-gray-600">
@@ -90,7 +91,7 @@ const Timeline = () => {
           <h3 className="text-lg font-medium text-gray-300 mb-2">
             {trades.length === 0 ? 'No trades yet' : 'No trades match your filters'}
           </h3>
-          <p className="text-gray-500">
+          <p className="text-gray-500 text-sm sm:text-base px-4">
             {trades.length === 0 
               ? 'Start recording your trades to build your timeline' 
               : 'Try adjusting your search or filter criteria'
@@ -98,34 +99,34 @@ const Timeline = () => {
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4 max-w-full overflow-hidden">
           {filteredTrades.map((trade, index) => (
             <div key={trade.id} className="relative">
-              {/* Timeline line */}
+              {/* Timeline line for desktop */}
               {index !== filteredTrades.length - 1 && (
-                <div className="absolute left-6 top-16 w-0.5 h-16 bg-gray-700"></div>
+                <div className="absolute left-6 top-16 w-0.5 h-16 bg-gray-700 hidden sm:block"></div>
               )}
               
-              <Card className="bg-gray-800/50 border-gray-700 hover:border-gray-600 transition-all duration-200 cursor-pointer ml-12">
-                <CardContent className="p-6">
+              <Card className="bg-gray-800/50 border-gray-700 hover:border-gray-600 transition-all duration-200 cursor-pointer sm:ml-12 overflow-hidden">
+                <CardContent className="p-4 sm:p-6">
                   <div className="flex items-start justify-between">
-                    {/* Timeline dot */}
-                    <div className="absolute -left-6 top-6 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-800"></div>
+                    {/* Timeline dot for desktop */}
+                    <div className="absolute -left-6 top-6 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-800 hidden sm:block"></div>
                     
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-4 mb-3">
-                        <div className="flex items-center space-x-2">
-                          <Calendar className="w-4 h-4 text-gray-400" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-4 mb-3">
+                        <div className="flex items-center space-x-2 flex-wrap">
+                          <Calendar className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           <span className="text-sm text-gray-400">{trade.trade_date}</span>
                           {trade.trade_time && (
                             <>
-                              <Clock className="w-4 h-4 text-gray-400 ml-2" />
+                              <Clock className="w-4 h-4 text-gray-400 ml-2 flex-shrink-0" />
                               <span className="text-sm text-gray-400">{trade.trade_time}</span>
                             </>
                           )}
                         </div>
                         {trade.recording_url && (
-                          <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30" variant="outline">
+                          <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30 flex-shrink-0" variant="outline">
                             {isVideoFile(trade.recording_url) ? (
                               <>
                                 <Video className="w-3 h-3 mr-1" />
@@ -146,18 +147,18 @@ const Timeline = () => {
                         )}
                       </div>
                       
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center space-x-4">
-                          <h3 className="text-xl font-semibold text-white">{trade.instrument}</h3>
-                          <Badge className={getTagColor(trade.tag)} variant="outline">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-3">
+                        <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
+                          <h3 className="text-lg sm:text-xl font-semibold text-white truncate">{trade.instrument}</h3>
+                          <Badge className={`${getTagColor(trade.tag)} flex-shrink-0`} variant="outline">
                             <Tag className="w-3 h-3 mr-1" />
                             {trade.tag}
                           </Badge>
                         </div>
                         
-                        <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-4 justify-between sm:justify-end">
                           <div className="text-right">
-                            <div className="text-sm text-gray-400">
+                            <div className="text-sm text-gray-400 break-all">
                               {trade.entry_price} → {trade.exit_price}
                             </div>
                             <div className={`text-lg font-bold ${parseFloat(getPnL(trade)) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -165,20 +166,20 @@ const Timeline = () => {
                             </div>
                           </div>
                           {parseFloat(getPnL(trade)) >= 0 ? (
-                            <TrendingUp className="w-6 h-6 text-green-400" />
+                            <TrendingUp className="w-6 h-6 text-green-400 flex-shrink-0" />
                           ) : (
-                            <TrendingDown className="w-6 h-6 text-red-400" />
+                            <TrendingDown className="w-6 h-6 text-red-400 flex-shrink-0" />
                           )}
                         </div>
                       </div>
                       
                       {trade.notes && (
-                        <p className="text-gray-300 leading-relaxed mb-4">{trade.notes}</p>
+                        <p className="text-gray-300 leading-relaxed mb-4 break-words">{trade.notes}</p>
                       )}
                       
                       {/* Media Display */}
                       {trade.recording_url && (
-                        <div className="mb-4">
+                        <div className="mb-4 max-w-full">
                           {isVideoFile(trade.recording_url) ? (
                             <video 
                               controls 
@@ -198,15 +199,15 @@ const Timeline = () => {
                           ) : (
                             <div className="p-4 bg-gray-700/50 rounded-lg border border-gray-600 max-w-md">
                               <div className="flex items-center space-x-2 text-gray-300">
-                                <FileText className="w-5 h-5" />
-                                <span>Uploaded file</span>
+                                <FileText className="w-5 h-5 flex-shrink-0" />
+                                <span className="truncate">Uploaded file</span>
                               </div>
                             </div>
                           )}
                         </div>
                       )}
                       
-                      <div className="flex space-x-2">
+                      <div className="flex flex-wrap gap-2">
                         {trade.recording_url && (
                           <Button 
                             variant="outline" 
@@ -215,7 +216,8 @@ const Timeline = () => {
                             onClick={() => window.open(trade.recording_url, '_blank')}
                           >
                             <ExternalLink className="w-4 h-4 mr-1" />
-                            Open in New Tab
+                            <span className="hidden sm:inline">Open in New Tab</span>
+                            <span className="sm:hidden">Open</span>
                           </Button>
                         )}
                       </div>

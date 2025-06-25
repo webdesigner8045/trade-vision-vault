@@ -57,6 +57,19 @@
 
   body {
     @apply bg-background text-foreground dark;
+    min-height: 100vh;
+    min-height: 100dvh; /* Better mobile support */
+  }
+
+  html {
+    /* Prevent horizontal scroll on mobile */
+    overflow-x: hidden;
+  }
+
+  /* Ensure main content doesn't overflow */
+  main {
+    min-height: 0;
+    overflow: hidden;
   }
 }
 
@@ -69,6 +82,24 @@
   
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Mobile optimizations */
+  .mobile-safe {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Prevent text from breaking layout on mobile */
+  .text-break {
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  /* Better touch targets for mobile */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
 
@@ -102,4 +133,42 @@
 
 .learning-gradient {
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+}
+
+/* Mobile-specific improvements */
+@media (max-width: 640px) {
+  .mobile-stack {
+    flex-direction: column;
+  }
+
+  .mobile-full {
+    width: 100%;
+  }
+
+  .mobile-text-sm {
+    font-size: 0.875rem;
+  }
+
+  /* Improve mobile forms */
+  input, textarea, select {
+    font-size: 16px; /* Prevent zoom on iOS */
+  }
+
+  /* Better mobile buttons */
+  button {
+    min-height: 44px;
+  }
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in {
+    animation: none;
+  }
+  
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

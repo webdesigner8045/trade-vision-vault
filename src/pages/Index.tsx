@@ -13,7 +13,7 @@ const Index = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
+      <div className="min-h-screen min-h-dvh bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center px-4">
         <div className="text-white">Loading...</div>
       </div>
     );
@@ -37,7 +37,7 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 overflow-x-hidden">
+    <div className="min-h-screen min-h-dvh bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 overflow-x-hidden">
       <Header onNewReplay={() => setCurrentView('form')} />
       
       {/* Navigation */}
@@ -46,7 +46,7 @@ const Index = () => {
           <nav className="flex space-x-1 sm:space-x-6 overflow-x-auto scrollbar-hide">
             <button
               onClick={() => setCurrentView('dashboard')}
-              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap touch-target ${
                 currentView === 'dashboard'
                   ? 'bg-green-600 text-white'
                   : 'text-gray-300 hover:text-white hover:bg-gray-800'
@@ -56,7 +56,7 @@ const Index = () => {
             </button>
             <button
               onClick={() => setCurrentView('timeline')}
-              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap touch-target ${
                 currentView === 'timeline'
                   ? 'bg-green-600 text-white'
                   : 'text-gray-300 hover:text-white hover:bg-gray-800'
@@ -66,7 +66,7 @@ const Index = () => {
             </button>
             <button
               onClick={() => setCurrentView('form')}
-              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap touch-target ${
                 currentView === 'form'
                   ? 'bg-green-600 text-white'
                   : 'text-gray-300 hover:text-white hover:bg-gray-800'
@@ -79,7 +79,7 @@ const Index = () => {
       </div>
 
       {/* Main Content */}
-      <main className="flex-1">
+      <main className="flex-1 min-h-0">
         {renderContent()}
       </main>
     </div>

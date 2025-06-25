@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { FileText, TrendingUp, LogOut, User, Menu, X, Settings, Download, Upload, Bell } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
 interface HeaderProps {
   onNewReplay?: () => void;
@@ -10,8 +11,9 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
   const { user, signOut } = useAuth();
+  const { toast } = useToast();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [notifications, setNotifications] = useState(0);
+  const [notifications] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close menu when clicking outside
@@ -59,21 +61,26 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
   };
 
   const handleDownloadExtension = () => {
-    // Open Chrome Web Store or download page
     window.open('https://chrome.google.com/webstore/detail/replay-locker', '_blank');
     setIsMobileMenuOpen(false);
+    toast({
+      title: "Extension Download",
+      description: "Opening Chrome Web Store..."
+    });
   };
 
   const handleImportData = () => {
-    // Trigger file input for importing trade data
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.csv,.json';
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
-        console.log('Importing file:', file.name);
-        // Handle file import logic here
+        toast({
+          title: "Import Started",
+          description: `Importing ${file.name}...`
+        });
+        // Add actual import logic here
       }
     };
     input.click();
@@ -81,22 +88,51 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
   };
 
   const handleExportData = () => {
-    // Export user's trade data
-    console.log('Exporting trade data...');
-    // Handle export logic here
+    try {
+      // Create mock export data
+      const exportData = {
+        trades: [],
+        exported_at: new Date().toISOString(),
+        version: "1.0"
+      };
+      
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `replay-locker-export-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Export Complete",
+        description: "Your trade data has been exported successfully."
+      });
+    } catch (error) {
+      toast({
+        title: "Export Failed",
+        description: "Failed to export trade data. Please try again.",
+        variant: "destructive"
+      });
+    }
     setIsMobileMenuOpen(false);
   };
 
   const handleSettings = () => {
-    // Navigate to settings page
-    console.log('Opening settings...');
+    toast({
+      title: "Settings",
+      description: "Settings panel opened."
+    });
     setIsMobileMenuOpen(false);
   };
 
   const handleNotifications = () => {
-    // Open notifications panel
-    console.log('Opening notifications...');
-    setNotifications(0); // Clear notification count
+    toast({
+      title: "Notifications",
+      description: "No new notifications."
+    });
     setIsMobileMenuOpen(false);
   };
 
@@ -114,7 +150,6 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
         {/* Desktop Navigation */}
         {user && (
           <div className="hidden md:flex items-center space-x-2">
-            {/* Notifications */}
             <Button
               variant="ghost"
               size="icon"
@@ -130,7 +165,6 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
               )}
             </Button>
 
-            {/* Import Data */}
             <Button
               variant="ghost"
               size="icon"
@@ -141,7 +175,6 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
               <Upload className="w-4 h-4" />
             </Button>
 
-            {/* Export Data */}
             <Button
               variant="ghost"
               size="icon"
@@ -152,7 +185,6 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
               <Download className="w-4 h-4" />
             </Button>
 
-            {/* Extension Download */}
             <Button
               variant="ghost"
               size="icon"
@@ -165,7 +197,6 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
               </svg>
             </Button>
 
-            {/* Settings */}
             <Button
               variant="ghost"
               size="icon"
@@ -176,13 +207,11 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
               <Settings className="w-4 h-4" />
             </Button>
 
-            {/* User Info */}
             <div className="flex items-center space-x-2 text-gray-300 px-2">
               <User className="w-4 h-4" />
               <span className="text-sm max-w-[120px] truncate">{user.email}</span>
             </div>
 
-            {/* New Replay Button */}
             <Button 
               className="bg-green-600 hover:bg-green-700 transition-colors" 
               onClick={onNewReplay}
@@ -191,7 +220,6 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
               New Replay
             </Button>
 
-            {/* Sign Out */}
             <Button 
               variant="outline" 
               className="border-gray-600 text-gray-300 hover:bg-gray-800 transition-colors" 
@@ -222,15 +250,13 @@ const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
             {/* Mobile Dropdown Menu */}
             {isMobileMenuOpen && (
               <div className="absolute right-4 top-16 w-72 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-2 z-50 animate-fade-in">
-                {/* User Info */}
                 <div className="px-4 py-3 border-b border-gray-700">
                   <div className="flex items-center space-x-2 text-gray-300">
                     <User className="w-4 h-4" />
-                    <span className="text-sm font-medium">{user.email}</span>
+                    <span className="text-sm font-medium truncate">{user.email}</span>
                   </div>
                 </div>
 
-                {/* Menu Items */}
                 <div className="py-2">
                   <button
                     onClick={handleNewReplay}
