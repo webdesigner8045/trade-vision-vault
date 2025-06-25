@@ -8,7 +8,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "tabs"
+    "tabs",
+    "notifications"
   ],
   "host_permissions": [
     "https://www.tradingview.com/*",
@@ -17,7 +18,8 @@
     "https://*.mt5web.com/*",
     "https://*.fxpro.com/*",
     "https://*.oanda.com/*",
-    "https://*.ig.com/*"
+    "https://*.ig.com/*",
+    "https://trade-vision-vault.vercel.app/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -44,7 +46,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Replay Locker"
+    "default_title": "Replay Locker - Trade Capture"
   },
   "icons": {
     "16": "icons/icon16.png",
