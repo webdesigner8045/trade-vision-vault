@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -273,20 +272,20 @@ const TradeReplayForm: React.FC<TradeReplayFormProps> = ({ onTradeCreated }) => 
                     </Button>
                   </div>
                   
-                  {/* Preview Content */}
+                  {/* Preview Content - Adjusted sizes */}
                   <div className="mt-2">
                     {isVideoFile(formData.file) ? (
                       <video 
                         src={previewUrl} 
                         controls 
-                        className="w-full max-w-sm rounded-lg border border-gray-600"
+                        className="w-full max-w-lg h-auto rounded-lg border border-gray-600"
                         preload="metadata"
                       />
                     ) : isImageFile(formData.file) ? (
                       <img 
                         src={previewUrl} 
                         alt="Preview"
-                        className="w-full max-w-sm rounded-lg border border-gray-600"
+                        className="w-full max-w-lg h-auto max-h-96 object-contain rounded-lg border border-gray-600"
                       />
                     ) : null}
                   </div>
