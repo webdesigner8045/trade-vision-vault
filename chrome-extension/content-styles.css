@@ -1,0 +1,81 @@
+
+/* Styles for injected UI elements */
+.replay-locker-record-btn {
+  background: #059669;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  margin-left: 8px;
+  z-index: 9999;
+}
+
+.replay-locker-record-btn:hover {
+  background: #047857;
+  transform: translateY(-1px);
+}
+
+.replay-locker-record-btn.active {
+  background: #dc2626;
+  animation: pulse 2s infinite;
+}
+
+.replay-locker-record-btn.active:hover {
+  background: #b91c1c;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.replay-locker-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: #1f2937;
+  color: white;
+  padding: 12px 20px;
+  border-radius: 8px;
+  border-left: 4px solid #059669;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 10000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* TradingView specific adjustments */
+[data-name="header"] .replay-locker-record-btn {
+  height: 32px;
+}
+
+/* MT4/MT5 specific adjustments */
+.mt4-toolbar .replay-locker-record-btn,
+.mt5-toolbar .replay-locker-record-btn {
+  height: 24px;
+  padding: 4px 8px;
+  font-size: 12px;
+}

@@ -1,0 +1,17 @@
+
+{
+  "name": "replay-locker-extension",
+  "version": "1.0.0",
+  "description": "Chrome Extension for Replay Locker trade capture",
+  "main": "background.js",
+  "scripts": {
+    "build": "echo 'No build step required for vanilla JS extension'",
+    "lint": "echo 'Add ESLint if needed'"
+  },
+  "keywords": ["chrome-extension", "trading", "replay-locker"],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.0.246"
+  }
+}
