@@ -1,49 +1,65 @@
+import React, { useState } from 'react';
 
-import React from 'react';
-import { Button } from '@/components/ui/button';
-import { FileText, Calendar, TrendingUp, LogOut, User } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-
-interface HeaderProps {
-  onNewReplay?: () => void;
-}
-
-const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
-  const { user, signOut } = useAuth();
+export default function Header() {
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <header className="bg-gray-900/80 backdrop-blur-sm border-b border-gray-700 px-6 py-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-8">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold text-white">Replay Locker</span>
-          </div>
+    <header className="w-full max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 bg-white shadow-md fixed top-0 left-0 right-0 z-50">
+      <div className="flex items-center justify-between h-16">
+        {/* Logo or brand */}
+        <div className="flex-shrink-0">
+          <a href="/" className="text-xl font-bold text-gray-800">Trade Vision Vault</a>
         </div>
 
-        <div className="flex items-center space-x-4">
-          {user && (
-            <>
-              <div className="flex items-center space-x-2 text-gray-300">
-                <User className="w-4 h-4" />
-                <span className="text-sm">{user.email}</span>
-              </div>
-              <Button className="bg-green-600 hover:bg-green-700" onClick={onNewReplay}>
-                <FileText className="w-4 h-4 mr-2" />
-                New Replay
-              </Button>
-              <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800" onClick={signOut}>
-                <LogOut className="w-4 h-4 mr-2" />
-                Sign Out
-              </Button>
-            </>
-          )}
+        {/* Desktop nav */}
+        <nav className="hidden md:flex space-x-6">
+          <a href="/" className="text-gray-700 hover:text-gray-900">Home</a>
+          <a href="/upload" className="text-gray-700 hover:text-gray-900">Upload</a>
+          <a href="/replay" className="text-gray-700 hover:text-gray-900">Replay</a>
+          <a href="/dashboard" className="text-gray-700 hover:text-gray-900">Dashboard</a>
+        </nav>
+
+        {/* Mobile hamburger menu button */}
+        <div className="md:hidden">
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className="text-gray-700 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+            aria-label="Toggle menu"
+          >
+            {isOpen ? (
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            )}
+          </button>
         </div>
       </div>
+
+      {/* Mobile menu */}
+      {isOpen && (
+        <nav className="md:hidden px-4 pb-4 space-y-2 bg-white shadow-lg">
+          <a href="/" className="block text-gray-700 hover:text-gray-900">Home</a>
+          <a href="/upload" className="block text-gray-700 hover:text-gray-900">Upload</a>
+          <a href="/replay" className="block text-gray-700 hover:text-gray-900">Replay</a>
+          <a href="/dashboard" className="block text-gray-700 hover:text-gray-900">Dashboard</a>
+        </nav>
+      )}
     </header>
   );
-};
-
-export default Header;
+}
