@@ -1,40 +1,44 @@
-import React from "react";
+import React from 'react';
+import { Button } from '@/components/ui/button';
+import { FileText, Calendar, TrendingUp, LogOut, User } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
-const Header = () => {
+interface HeaderProps {
+  onNewReplay?: () => void;
+}
+
+const Header: React.FC<HeaderProps> = ({ onNewReplay }) => {
+  const { user, signOut } = useAuth();
+
   return (
-    <header className="bg-gray-900 text-white shadow-lg">
-      <div className="max-w-7xl mx-auto flex items-center justify-between px-4 py-3">
-        {/* Logo / App Name */}
-        <div className="text-2xl font-bold tracking-wide">
-          Replay Locker
+    <header className="bg-gray-900/80 backdrop-blur-sm border-b border-gray-700 px-6 py-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-8">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center">
+              <TrendingUp className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-xl font-bold text-white">Replay Locker</span>
+          </div>
         </div>
 
-        {/* Navigation Links */}
-        <nav className="space-x-6 hidden md:flex">
-          <a href="#" className="hover:text-gray-300">Home</a>
-          <a href="#" className="hover:text-gray-300">Library</a>
-          <a href="#" className="hover:text-gray-300">Upload</a>
-          <a href="#" className="hover:text-gray-300">Profile</a>
-        </nav>
-
-        {/* Mobile Menu Icon */}
-        <div className="md:hidden">
-          <button>
-            <svg
-              className="w-6 h-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          </button>
+        <div className="flex items-center space-x-4">
+          {user && (
+            <>
+              <div className="flex items-center space-x-2 text-gray-300">
+                <User className="w-4 h-4" />
+                <span className="text-sm">{user.email}</span>
+              </div>
+              <Button className="bg-green-600 hover:bg-green-700" onClick={onNewReplay}>
+                <FileText className="w-4 h-4 mr-2" />
+                New Replay
+              </Button>
+              <Button variant="outline" className="border-gray-600 text-gray-300 hover:bg-gray-800" onClick={signOut}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </header>
