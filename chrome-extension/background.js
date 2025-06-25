@@ -31,15 +31,14 @@ class ExtensionBackground {
   async initializeSupabase() {
     // Initialize Supabase client for syncing
     try {
-      // Import Supabase client if available
-      const { createClient } = await import('https://cdn.skypack.dev/@supabase/supabase-js');
-      this.supabaseClient = createClient(
-        'https://akhcugmczkfxrhzuadlo.supabase.co',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFraGN1Z21jemtmeHJoenVhZGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4MDM3MTMsImV4cCI6MjA2NjM3OTcxM30.G93cLEdFV4yngYmr7KbDG2IP9Z2WuGBS_Ug3AVXdrt4'
-      );
-      console.log('Supabase client initialized');
+      // Create a simple client without external imports
+      this.supabaseClient = {
+        url: 'https://akhcugmczkfxrhzuadlo.supabase.co',
+        key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFraGN1Z21jemtmeHJoenVhZGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4MDM3MTMsImV4cCI6MjA2NjM3OTcxM30.G93cLEdFV4yngYmr7KbDG2IP9Z2WuGBS_Ug3AVXdrt4'
+      };
+      console.log('Supabase client configured');
     } catch (error) {
-      console.log('Supabase client not available, using local storage only');
+      console.log('Supabase client configuration failed:', error);
     }
   }
 
@@ -49,7 +48,17 @@ class ExtensionBackground {
       isRecording: false,
       autoSync: true,
       captureScreenshots: true,
-      enableNotifications: true
+      enableNotifications: true,
+      syncInterval: 15,
+      settings: {
+        autoRecord: true,
+        showNotifications: true,
+        autoScreenshot: false,
+        autoSync: true,
+        syncInterval: 15,
+        tradingviewEnabled: true,
+        mt4Enabled: true
+      }
     });
   }
 
@@ -61,7 +70,10 @@ class ExtensionBackground {
       'mt5web.com',
       'fxpro.com',
       'oanda.com',
-      'ig.com'
+      'ig.com',
+      'etoro.com',
+      'plus500.com',
+      'avatrade.com'
     ];
 
     const shouldInject = supportedDomains.some(domain => url.includes(domain));
@@ -81,11 +93,13 @@ class ExtensionBackground {
               target: { tabId },
               files: ['content-tradingview.js']
             });
+            console.log('TradingView content script injected');
           } else if (url.includes('mt4') || url.includes('mt5')) {
             await chrome.scripting.executeScript({
               target: { tabId },
               files: ['content-mt4.js']
             });
+            console.log('MT4/MT5 content script injected');
           }
         }
       } catch (error) {
@@ -127,6 +141,26 @@ class ExtensionBackground {
           sendResponse({ trades });
           break;
 
+        case 'UPDATE_TRADE':
+          await this.updateTrade(message.tradeId, message.updates);
+          sendResponse({ success: true });
+          break;
+
+        case 'DELETE_TRADE':
+          await this.deleteTrade(message.tradeId);
+          sendResponse({ success: true });
+          break;
+
+        case 'CLEAR_ALL_DATA':
+          await this.clearAllData();
+          sendResponse({ success: true });
+          break;
+
+        case 'EXPORT_TRADES':
+          const exportData = await this.exportTrades();
+          sendResponse(exportData);
+          break;
+
         default:
           sendResponse({ error: 'Unknown message type' });
       }
@@ -137,6 +171,8 @@ class ExtensionBackground {
   }
 
   async handleTradeDetection(tradeData, tab) {
+    console.log('📈 Handling trade detection:', tradeData);
+    
     // Store trade data locally
     const trades = await this.getStoredTrades();
     const newTrade = {
@@ -231,23 +267,33 @@ class ExtensionBackground {
       // Convert trades to Supabase format
       const tradesToSync = unsyncedTrades.map(trade => ({
         user_id: user.user.id,
-        instrument: trade.instrument,
+        instrument: trade.instrument || 'UNKNOWN',
         entry_price: parseFloat(trade.entry_price) || 0,
         exit_price: parseFloat(trade.exit_price) || parseFloat(trade.entry_price) || 0,
         trade_date: trade.trade_date,
         trade_time: trade.trade_time,
-        tag: trade.direction || 'UNKNOWN',
-        notes: `Platform: ${trade.platform}\nTrigger: ${trade.trigger}\nURL: ${trade.url}`,
+        tag: trade.direction || trade.tag || 'UNKNOWN',
+        notes: trade.notes || `Platform: ${trade.platform || 'Unknown'}\nTrigger: ${trade.trigger || 'Unknown'}\nURL: ${trade.url || ''}`,
         recording_url: trade.screenshot_url,
         chart_url: trade.url
       }));
 
-      // Insert trades into Supabase
-      const { data, error } = await this.supabaseClient
-        .from('trade_replays')
-        .insert(tradesToSync);
+      // Use fetch API to insert trades
+      const response = await fetch(`${this.supabaseClient.url}/rest/v1/trade_replays`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.user.access_token || this.supabaseClient.key}`,
+          'apikey': this.supabaseClient.key,
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(tradesToSync)
+      });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Sync failed: ${response.status} ${errorText}`);
+      }
 
       // Mark trades as synced
       const syncedTrades = trades.map(trade => 
@@ -277,32 +323,72 @@ class ExtensionBackground {
     try {
       const tradeData = {
         user_id: user.user.id,
-        instrument: trade.instrument,
+        instrument: trade.instrument || 'UNKNOWN',
         entry_price: parseFloat(trade.entry_price) || 0,
         exit_price: parseFloat(trade.exit_price) || parseFloat(trade.entry_price) || 0,
         trade_date: trade.trade_date,
         trade_time: trade.trade_time,
-        tag: trade.direction || 'UNKNOWN',
-        notes: `Platform: ${trade.platform}\nTrigger: ${trade.trigger}\nURL: ${trade.url}`,
+        tag: trade.direction || trade.tag || 'UNKNOWN',
+        notes: trade.notes || `Platform: ${trade.platform || 'Unknown'}\nTrigger: ${trade.trigger || 'Unknown'}\nURL: ${trade.url || ''}`,
         recording_url: trade.screenshot_url,
         chart_url: trade.url
       };
 
-      const { error } = await this.supabaseClient
-        .from('trade_replays')
-        .insert([tradeData]);
+      const response = await fetch(`${this.supabaseClient.url}/rest/v1/trade_replays`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.user.access_token || this.supabaseClient.key}`,
+          'apikey': this.supabaseClient.key,
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify([tradeData])
+      });
 
-      if (!error) {
+      if (response.ok) {
         // Mark as synced
         const trades = await this.getStoredTrades();
         const updatedTrades = trades.map(t => 
           t.id === trade.id ? { ...t, synced: true } : t
         );
         await chrome.storage.local.set({ trades: updatedTrades });
+        console.log('Single trade synced successfully');
       }
     } catch (error) {
       console.log('Single trade sync failed:', error);
     }
+  }
+
+  async updateTrade(tradeId, updates) {
+    const trades = await this.getStoredTrades();
+    const updatedTrades = trades.map(trade => 
+      trade.id === tradeId ? { ...trade, ...updates, synced: false } : trade
+    );
+    await chrome.storage.local.set({ trades: updatedTrades });
+  }
+
+  async deleteTrade(tradeId) {
+    const trades = await this.getStoredTrades();
+    const filteredTrades = trades.filter(trade => trade.id !== tradeId);
+    await chrome.storage.local.set({ trades: filteredTrades });
+  }
+
+  async clearAllData() {
+    await chrome.storage.local.remove(['trades', 'screenshots']);
+    console.log('All trade data cleared');
+  }
+
+  async exportTrades() {
+    const trades = await this.getStoredTrades();
+    const screenshots = await this.getStoredScreenshots();
+    
+    return {
+      trades,
+      screenshots,
+      exported_at: new Date().toISOString(),
+      total_trades: trades.length,
+      total_screenshots: screenshots.length
+    };
   }
 
   async getStoredTrades() {
@@ -321,6 +407,7 @@ class ExtensionBackground {
   }
 
   showTradeNotification() {
+    // Update extension badge
     chrome.action.setBadgeText({ text: '!' });
     chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
     

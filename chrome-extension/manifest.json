@@ -3,7 +3,7 @@
   "manifest_version": 3,
   "name": "Replay Locker - Trade Capture",
   "version": "1.0.0",
-  "description": "Automatically capture and sync trading data with Replay Locker",
+  "description": "Automatically capture and sync trading data with Replay Locker web app",
   "permissions": [
     "storage",
     "activeTab",
@@ -22,7 +22,12 @@
     "https://*.etoro.com/*",
     "https://*.plus500.com/*",
     "https://*.avatrade.com/*",
-    "https://trade-vision-vault.vercel.app/*"
+    "https://*.fxtm.com/*",
+    "https://*.xm.com/*",
+    "https://*.pepperstone.com/*",
+    "https://*.forex.com/*",
+    "https://trade-vision-vault.vercel.app/*",
+    "https://akhcugmczkfxrhzuadlo.supabase.co/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -40,7 +45,17 @@
     {
       "matches": [
         "https://*.mt4web.com/*",
-        "https://*.mt5web.com/*"
+        "https://*.mt5web.com/*",
+        "https://*.fxpro.com/*",
+        "https://*.oanda.com/*",
+        "https://*.ig.com/*",
+        "https://*.etoro.com/*",
+        "https://*.plus500.com/*",
+        "https://*.avatrade.com/*",
+        "https://*.fxtm.com/*",
+        "https://*.xm.com/*",
+        "https://*.pepperstone.com/*",
+        "https://*.forex.com/*"
       ],
       "js": ["content-mt4.js"],
       "css": ["content-styles.css"],

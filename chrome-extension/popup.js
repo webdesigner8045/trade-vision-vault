@@ -14,14 +14,16 @@ class PopupController {
     this.setupEventListeners();
     this.updateUI();
     this.checkAuthStatus();
+    this.setupAutoRefresh();
   }
 
   async loadData() {
     try {
-      const result = await chrome.storage.local.get(['trades', 'isRecording', 'user']);
+      const result = await chrome.storage.local.get(['trades', 'isRecording', 'user', 'settings']);
       this.trades = result.trades || [];
       this.isRecording = result.isRecording || false;
       this.user = result.user || null;
+      this.settings = result.settings || {};
     } catch (error) {
       console.error('Failed to load data:', error);
     }
@@ -86,23 +88,35 @@ class PopupController {
     });
   }
 
+  setupAutoRefresh() {
+    // Refresh data every 5 seconds to show real-time updates
+    setInterval(async () => {
+      await this.loadData();
+      this.updateUI();
+    }, 5000);
+  }
+
   async toggleRecording() {
     this.isRecording = !this.isRecording;
     
-    // Save state and notify background
-    await chrome.runtime.sendMessage({
-      type: 'TOGGLE_RECORDING',
-      isRecording: this.isRecording
-    });
-    
-    // Show notification
-    if (this.isRecording) {
-      this.showNotification('Recording started', 'Trade capture is now active');
-    } else {
-      this.showNotification('Recording stopped', 'Trade capture is now inactive');
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'TOGGLE_RECORDING',
+        isRecording: this.isRecording
+      });
+      
+      // Show notification
+      if (this.isRecording) {
+        this.showNotification('Recording started', 'Trade capture is now active');
+      } else {
+        this.showNotification('Recording stopped', 'Trade capture is now inactive');
+      }
+      
+      this.updateUI();
+    } catch (error) {
+      console.error('Failed to toggle recording:', error);
+      this.showNotification('Error', 'Failed to toggle recording');
     }
-    
-    this.updateUI();
   }
 
   async handleAuth() {
@@ -116,6 +130,7 @@ class PopupController {
       await chrome.tabs.create({ 
         url: 'https://trade-vision-vault.vercel.app'
       });
+      this.showNotification('Opening web app', 'Please sign in to sync your trades');
     }
     this.updateUI();
   }
@@ -130,6 +145,9 @@ class PopupController {
 
         if (screenshot) {
           this.showNotification('Screenshot captured', 'Screenshot saved successfully');
+          
+          // Optionally trigger manual trade capture
+          await this.captureManualTrade();
         } else {
           this.showNotification('Screenshot failed', 'Could not capture screenshot');
         }
@@ -138,6 +156,29 @@ class PopupController {
       console.error('Screenshot failed:', error);
       this.showNotification('Screenshot failed', 'Could not capture screenshot');
     }
+  }
+
+  async captureManualTrade() {
+    // Get current tab info
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    const tradeData = {
+      id: `manual-${Date.now()}`,
+      instrument: 'Manual Entry',
+      direction: 'UNKNOWN',
+      entry_price: 0,
+      platform: 'Manual',
+      trade_date: new Date().toISOString().split('T')[0],
+      trade_time: new Date().toTimeString().split(' ')[0],
+      timestamp: new Date().toISOString(),
+      trigger: 'manual_screenshot',
+      url: tab?.url || window.location.href,
+      synced: false
+    };
+
+    this.trades.push(tradeData);
+    await chrome.storage.local.set({ trades: this.trades });
+    this.updateUI();
   }
 
   async syncTrades() {
@@ -175,23 +216,22 @@ class PopupController {
       
       // Restore button
       const syncBtn = document.getElementById('syncBtn');
-      syncBtn.innerHTML = originalHTML;
+      syncBtn.innerHTML = syncBtn.innerHTML.replace('<div class="spinner"></div>', 
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" stroke="currentColor" stroke-width="2"/></svg>');
       syncBtn.disabled = false;
     }
   }
 
-  exportTrades() {
+  async exportTrades() {
     if (this.trades.length === 0) {
       this.showNotification('No data', 'No trades to export');
       return;
     }
 
     try {
-      const exportData = {
-        trades: this.trades,
-        exported_at: new Date().toISOString(),
-        total_trades: this.trades.length
-      };
+      const exportData = await chrome.runtime.sendMessage({
+        type: 'EXPORT_TRADES'
+      });
 
       const blob = new Blob([JSON.stringify(exportData, null, 2)], {
         type: 'application/json'
@@ -217,7 +257,10 @@ class PopupController {
   async clearAllData() {
     if (confirm('Are you sure you want to clear all captured trades? This cannot be undone.')) {
       try {
-        await chrome.storage.local.remove(['trades', 'screenshots']);
+        await chrome.runtime.sendMessage({
+          type: 'CLEAR_ALL_DATA'
+        });
+        
         this.trades = [];
         this.updateUI();
         this.showNotification('Data cleared', 'All trade data has been removed');
@@ -233,32 +276,103 @@ class PopupController {
     const modal = document.createElement('div');
     modal.className = 'manual-trade-modal';
     modal.innerHTML = `
-      <div class="modal-backdrop">
-        <div class="modal-content">
-          <h3>Add Manual Trade</h3>
+      <div class="modal-backdrop" style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.8);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      ">
+        <div class="modal-content" style="
+          background: #1f2937;
+          border-radius: 8px;
+          padding: 24px;
+          width: 100%;
+          max-width: 400px;
+          color: white;
+        ">
+          <h3 style="margin: 0 0 20px 0; font-size: 18px; font-weight: 600;">Add Manual Trade</h3>
           <form id="manualTradeForm">
-            <div class="form-group">
-              <label>Symbol:</label>
-              <input type="text" id="manualSymbol" required placeholder="e.g., EURUSD">
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 4px; font-size: 14px;">Symbol:</label>
+              <input type="text" id="manualSymbol" required placeholder="e.g., EURUSD" style="
+                width: 100%;
+                padding: 8px 12px;
+                background: #374151;
+                border: 1px solid #4b5563;
+                border-radius: 6px;
+                color: white;
+                font-size: 14px;
+              ">
             </div>
-            <div class="form-group">
-              <label>Direction:</label>
-              <select id="manualDirection" required>
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 4px; font-size: 14px;">Direction:</label>
+              <select id="manualDirection" required style="
+                width: 100%;
+                padding: 8px 12px;
+                background: #374151;
+                border: 1px solid #4b5563;
+                border-radius: 6px;
+                color: white;
+                font-size: 14px;
+              ">
                 <option value="BUY">Buy/Long</option>
                 <option value="SELL">Sell/Short</option>
               </select>
             </div>
-            <div class="form-group">
-              <label>Entry Price:</label>
-              <input type="number" id="manualPrice" step="0.00001" required>
+            <div style="margin-bottom: 16px;">
+              <label style="display: block; margin-bottom: 4px; font-size: 14px;">Entry Price:</label>
+              <input type="number" id="manualPrice" step="0.00001" required style="
+                width: 100%;
+                padding: 8px 12px;
+                background: #374151;
+                border: 1px solid #4b5563;
+                border-radius: 6px;
+                color: white;
+                font-size: 14px;
+              ">
             </div>
-            <div class="form-group">
-              <label>Notes:</label>
-              <textarea id="manualNotes" placeholder="Optional notes..."></textarea>
+            <div style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 4px; font-size: 14px;">Notes:</label>
+              <textarea id="manualNotes" placeholder="Optional notes..." style="
+                width: 100%;
+                height: 80px;
+                padding: 8px 12px;
+                background: #374151;
+                border: 1px solid #4b5563;
+                border-radius: 6px;
+                color: white;
+                font-size: 14px;
+                resize: vertical;
+              "></textarea>
             </div>
-            <div class="form-actions">
-              <button type="button" id="cancelManual">Cancel</button>
-              <button type="submit">Add Trade</button>
+            <div style="display: flex; gap: 12px;">
+              <button type="button" id="cancelManual" style="
+                flex: 1;
+                padding: 8px 16px;
+                background: #374151;
+                color: #d1d5db;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                cursor: pointer;
+              ">Cancel</button>
+              <button type="submit" style="
+                flex: 1;
+                padding: 8px 16px;
+                background: #059669;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 14px;
+                cursor: pointer;
+              ">Add Trade</button>
             </div>
           </form>
         </div>
@@ -276,13 +390,15 @@ class PopupController {
         instrument: document.getElementById('manualSymbol').value,
         direction: document.getElementById('manualDirection').value,
         entry_price: parseFloat(document.getElementById('manualPrice').value),
+        exit_price: parseFloat(document.getElementById('manualPrice').value),
         notes: document.getElementById('manualNotes').value,
         platform: 'Manual Entry',
         trade_date: new Date().toISOString().split('T')[0],
         trade_time: new Date().toTimeString().split(' ')[0],
         timestamp: new Date().toISOString(),
         trigger: 'manual',
-        synced: false
+        synced: false,
+        tag: document.getElementById('manualDirection').value
       };
 
       // Save trade
@@ -297,6 +413,13 @@ class PopupController {
     // Handle cancel
     document.getElementById('cancelManual').addEventListener('click', () => {
       modal.remove();
+    });
+
+    // Handle backdrop click
+    modal.querySelector('.modal-backdrop').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        modal.remove();
+      }
     });
   }
 
@@ -404,20 +527,35 @@ class PopupController {
       <div class="trade-item ${trade.synced ? 'synced' : 'pending'}" data-trade-id="${trade.id}">
         <div class="trade-header">
           <div class="trade-symbol">${trade.instrument || 'Unknown'}</div>
-          <div class="trade-time">${new Date(trade.timestamp).toLocaleTimeString()}</div>
+          <div class="trade-time">${this.formatTime(trade.timestamp)}</div>
         </div>
         <div class="trade-details">
-          <div class="trade-direction ${trade.direction?.toLowerCase()}">${trade.direction || 'N/A'}</div>
-          <div class="trade-price">$${trade.entry_price || 'N/A'}</div>
+          <div class="trade-direction ${(trade.direction || 'unknown').toLowerCase()}">${trade.direction || 'N/A'}</div>
+          <div class="trade-price">${this.formatPrice(trade.entry_price)}</div>
         </div>
         <div class="trade-platform">${trade.platform || 'Unknown'}</div>
         <div class="trade-actions">
           <button class="btn-small annotate-btn" onclick="popupController.annotateTrade('${trade.id}')">
             📝 Tag
           </button>
+          <button class="btn-small delete-btn" onclick="popupController.deleteTrade('${trade.id}')" style="background: #dc2626; margin-left: 4px;">
+            🗑️
+          </button>
         </div>
       </div>
     `).join('');
+  }
+
+  formatTime(timestamp) {
+    return new Date(timestamp).toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  }
+
+  formatPrice(price) {
+    if (!price || price === 0) return 'N/A';
+    return typeof price === 'number' ? price.toFixed(5) : price;
   }
 
   updateSyncStatus() {
@@ -448,42 +586,78 @@ class PopupController {
       ).length;
 
       statsElement.innerHTML = `
-        <div class="stats-grid">
-          <div class="stat-item">
-            <div class="stat-value">${this.trades.length}</div>
-            <div class="stat-label">Total</div>
+        <div class="stats-grid" style="
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 8px;
+          margin: 12px 0;
+        ">
+          <div class="stat-item" style="text-align: center; padding: 8px; background: #1f2937; border-radius: 6px;">
+            <div class="stat-value" style="font-weight: 600; color: white;">${this.trades.length}</div>
+            <div class="stat-label" style="font-size: 11px; color: #9ca3af;">Total</div>
           </div>
-          <div class="stat-item">
-            <div class="stat-value">${todayTrades}</div>
-            <div class="stat-label">Today</div>
+          <div class="stat-item" style="text-align: center; padding: 8px; background: #1f2937; border-radius: 6px;">
+            <div class="stat-value" style="font-weight: 600; color: white;">${todayTrades}</div>
+            <div class="stat-label" style="font-size: 11px; color: #9ca3af;">Today</div>
           </div>
-          <div class="stat-item">
-            <div class="stat-value">${buyTrades}</div>
-            <div class="stat-label">Buy</div>
+          <div class="stat-item" style="text-align: center; padding: 8px; background: #1f2937; border-radius: 6px;">
+            <div class="stat-value" style="font-weight: 600; color: #10b981;">${buyTrades}</div>
+            <div class="stat-label" style="font-size: 11px; color: #9ca3af;">Buy</div>
           </div>
-          <div class="stat-item">
-            <div class="stat-value">${sellTrades}</div>
-            <div class="stat-label">Sell</div>
+          <div class="stat-item" style="text-align: center; padding: 8px; background: #1f2937; border-radius: 6px;">
+            <div class="stat-value" style="font-weight: 600; color: #ef4444;">${sellTrades}</div>
+            <div class="stat-label" style="font-size: 11px; color: #9ca3af;">Sell</div>
           </div>
         </div>
       `;
     }
   }
 
-  annotateTrade(tradeId) {
+  async annotateTrade(tradeId) {
     const trade = this.trades.find(t => t.id === tradeId);
     if (!trade) return;
 
     const annotation = prompt('Add a tag/note for this trade:', trade.notes || '');
     if (annotation !== null) {
-      trade.notes = annotation;
-      chrome.storage.local.set({ trades: this.trades });
-      this.updateUI();
-      this.showNotification('Trade updated', 'Annotation saved');
+      try {
+        await chrome.runtime.sendMessage({
+          type: 'UPDATE_TRADE',
+          tradeId: tradeId,
+          updates: { notes: annotation }
+        });
+        
+        await this.loadData();
+        this.updateUI();
+        this.showNotification('Trade updated', 'Annotation saved');
+      } catch (error) {
+        console.error('Failed to update trade:', error);
+        this.showNotification('Update failed', 'Could not save annotation');
+      }
+    }
+  }
+
+  async deleteTrade(tradeId) {
+    if (confirm('Are you sure you want to delete this trade?')) {
+      try {
+        await chrome.runtime.sendMessage({
+          type: 'DELETE_TRADE',
+          tradeId: tradeId
+        });
+        
+        await this.loadData();
+        this.updateUI();
+        this.showNotification('Trade deleted', 'Trade has been removed');
+      } catch (error) {
+        console.error('Failed to delete trade:', error);
+        this.showNotification('Delete failed', 'Could not delete trade');
+      }
     }
   }
 
   showNotification(title, message) {
+    console.log(`${title}: ${message}`);
+    
+    // Try to use Chrome notifications if available
     if (chrome.notifications) {
       chrome.notifications.create({
         type: 'basic',

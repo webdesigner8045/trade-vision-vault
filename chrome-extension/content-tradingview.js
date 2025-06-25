@@ -5,18 +5,30 @@ class TradingViewCapture {
     this.isRecording = false;
     this.detectedTrades = new Set();
     this.observers = [];
+    this.lastCapturedTrade = null;
+    this.recordButton = null;
     this.init();
   }
 
   async init() {
+    console.log('🚀 TradingView Capture initialized');
+    
+    // Mark as injected to prevent double injection
+    window.replayLockerInjected = true;
+    
     // Get recording status from storage
-    const status = await chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATUS' });
-    this.isRecording = status.isRecording || false;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATUS' });
+      this.isRecording = response?.isRecording || false;
+    } catch (error) {
+      console.log('Could not get recording status:', error);
+    }
     
     // Listen for recording toggle messages
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message.type === 'TOGGLE_RECORDING') {
         this.isRecording = message.isRecording;
+        this.updateRecordButton();
         this.showRecordingStatus();
         if (this.isRecording) {
           this.startAdvancedDetection();
@@ -26,7 +38,13 @@ class TradingViewCapture {
       }
     });
 
-    this.addRecordButton();
+    // Wait for page to be ready, then add UI elements
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => this.setupUI());
+    } else {
+      this.setupUI();
+    }
+    
     this.setupAdvancedTradeDetection();
     this.showRecordingStatus();
     
@@ -35,51 +53,95 @@ class TradingViewCapture {
     }
   }
 
+  setupUI() {
+    this.addRecordButton();
+    this.addKeyboardShortcuts();
+  }
+
   addRecordButton() {
     // Remove existing button
     const existingBtn = document.getElementById('replay-locker-record-btn');
     if (existingBtn) existingBtn.remove();
 
-    // Add Record/Replay button to TradingView header
-    const headerElement = document.querySelector('.js-header') || 
-                         document.querySelector('[data-name="header"]') ||
-                         document.querySelector('.tv-header');
+    // Try multiple selectors for TradingView header
+    const headerSelectors = [
+      'div[data-name="header"]',
+      '.js-header',
+      '.tv-header',
+      '.tv-header__area--user',
+      '.tv-header__area--right',
+      'header',
+      'div[class*="header"]'
+    ];
     
-    if (headerElement) {
-      const recordButton = document.createElement('div');
-      recordButton.id = 'replay-locker-record-btn';
-      recordButton.innerHTML = `
-        <button style="
-          background: ${this.isRecording ? '#dc2626' : '#059669'};
-          color: white;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          margin: 0 8px;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.2s;
-        ">
-          ${this.isRecording ? '⏹️ Stop Recording' : '🔴 Record Trade'}
-        </button>
-      `;
-      
-      recordButton.addEventListener('click', () => {
-        this.toggleRecording();
-      });
-      
-      headerElement.appendChild(recordButton);
+    let headerElement = null;
+    for (const selector of headerSelectors) {
+      headerElement = document.querySelector(selector);
+      if (headerElement) break;
+    }
+    
+    if (!headerElement) {
+      // Fallback: add to body with fixed positioning
+      headerElement = document.body;
     }
 
-    // Also add keyboard shortcut
+    // Create button container
+    const buttonContainer = document.createElement('div');
+    buttonContainer.id = 'replay-locker-record-btn';
+    buttonContainer.style.cssText = `
+      position: ${headerElement === document.body ? 'fixed' : 'relative'};
+      ${headerElement === document.body ? 'top: 20px; right: 20px; z-index: 10000;' : ''}
+      display: inline-block;
+      margin: 0 8px;
+    `;
+    
+    // Create the actual button
+    this.recordButton = document.createElement('button');
+    this.updateRecordButton();
+    
+    this.recordButton.addEventListener('click', () => {
+      this.toggleRecording();
+    });
+    
+    buttonContainer.appendChild(this.recordButton);
+    headerElement.appendChild(buttonContainer);
+  }
+
+  updateRecordButton() {
+    if (!this.recordButton) return;
+    
+    this.recordButton.style.cssText = `
+      background: ${this.isRecording ? '#dc2626' : '#059669'};
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    `;
+    
+    this.recordButton.innerHTML = this.isRecording ? 
+      '⏹️ Stop Recording' : 
+      '🔴 Record Trade';
+  }
+
+  addKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
+      // Ctrl+Shift+R to toggle recording
       if (e.ctrlKey && e.shiftKey && e.key === 'R') {
         e.preventDefault();
         this.toggleRecording();
+      }
+      // Ctrl+Shift+S to take manual screenshot
+      if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        this.captureManualTrade();
       }
     });
   }
@@ -87,13 +149,16 @@ class TradingViewCapture {
   async toggleRecording() {
     this.isRecording = !this.isRecording;
     
-    // Send to background script
-    await chrome.runtime.sendMessage({
-      type: 'TOGGLE_RECORDING',
-      isRecording: this.isRecording
-    });
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'TOGGLE_RECORDING',
+        isRecording: this.isRecording
+      });
+    } catch (error) {
+      console.log('Failed to toggle recording:', error);
+    }
     
-    this.addRecordButton(); // Update button
+    this.updateRecordButton();
     this.showRecordingStatus();
     
     if (this.isRecording) {
@@ -106,52 +171,84 @@ class TradingViewCapture {
   }
 
   setupAdvancedTradeDetection() {
-    // Monitor for order/position panels
+    // Monitor for trade-related DOM changes
+    this.monitorTradeElements();
     this.monitorOrderPanels();
     this.monitorPositionPanels();
-    this.monitorTradeButtons();
     this.monitorNetworkRequests();
+    this.monitorClickEvents();
   }
 
   startAdvancedDetection() {
+    console.log('🔴 Advanced trade detection started');
     // Start all detection methods
     this.setupAdvancedTradeDetection();
-    console.log('🔴 Advanced trade detection started');
   }
 
   stopAdvancedDetection() {
-    // Clear all observers
     this.observers.forEach(observer => observer.disconnect());
     this.observers = [];
     console.log('⏹️ Advanced trade detection stopped');
   }
 
-  monitorOrderPanels() {
-    // Monitor for order submission panels
-    const orderPanelSelectors = [
-      '[data-name="order-panel"]',
-      '.js-order-panel',
+  monitorTradeElements() {
+    // Watch for trade execution confirmations
+    const tradeSelectors = [
+      '[data-name*="order"]',
+      '[data-name*="trade"]',
+      '[data-name*="position"]',
       '.order-ticket',
       '.trade-panel',
+      '.position-item',
       '[class*="order"]',
-      '[class*="trade"]'
+      '[class*="trade"]',
+      '[class*="position"]'
     ];
 
-    orderPanelSelectors.forEach(selector => {
-      const observer = new MutationObserver((mutations) => {
-        if (!this.isRecording) return;
-        
-        mutations.forEach(mutation => {
-          mutation.addedNodes.forEach(node => {
-            if (node.nodeType === 1) { // Element node
-              this.checkForTradeExecution(node);
+    const observer = new MutationObserver((mutations) => {
+      if (!this.isRecording) return;
+      
+      mutations.forEach(mutation => {
+        mutation.addedNodes.forEach(node => {
+          if (node.nodeType === 1) {
+            this.checkForTradeExecution(node);
+          }
+        });
+      });
+    });
+
+    // Observe the entire document for trade-related changes
+    observer.observe(document.body, { 
+      childList: true, 
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'data-name']
+    });
+    
+    this.observers.push(observer);
+  }
+
+  monitorOrderPanels() {
+    // Specific monitoring for order panels
+    const orderSelectors = [
+      '[data-name="order-panel"]',
+      '.js-order-panel',
+      '.order-ticket'
+    ];
+
+    orderSelectors.forEach(selector => {
+      const elements = document.querySelectorAll(selector);
+      elements.forEach(element => {
+        const observer = new MutationObserver((mutations) => {
+          if (!this.isRecording) return;
+          
+          mutations.forEach(mutation => {
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+              this.checkForOrderSubmission(mutation.addedNodes);
             }
           });
         });
-      });
 
-      const elements = document.querySelectorAll(selector);
-      elements.forEach(element => {
         observer.observe(element, { childList: true, subtree: true });
         this.observers.push(observer);
       });
@@ -159,58 +256,34 @@ class TradingViewCapture {
   }
 
   monitorPositionPanels() {
-    // Monitor positions panel for new trades
+    // Monitor positions table for new positions
     const positionSelectors = [
       '[data-name="positions"]',
-      '.js-positions',
       '.positions-table',
-      '[class*="position"]'
+      '.js-positions'
     ];
 
     positionSelectors.forEach(selector => {
-      const observer = new MutationObserver((mutations) => {
-        if (!this.isRecording) return;
-        
-        mutations.forEach(mutation => {
-          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-            // New position added - likely a trade
-            this.captureTradeFromPosition(mutation.addedNodes);
-          }
-        });
-      });
-
       const elements = document.querySelectorAll(selector);
       elements.forEach(element => {
+        const observer = new MutationObserver((mutations) => {
+          if (!this.isRecording) return;
+          
+          mutations.forEach(mutation => {
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+              this.captureTradeFromPosition(mutation.addedNodes);
+            }
+          });
+        });
+
         observer.observe(element, { childList: true, subtree: true });
         this.observers.push(observer);
       });
     });
   }
 
-  monitorTradeButtons() {
-    // Enhanced button monitoring
-    document.addEventListener('click', (event) => {
-      if (!this.isRecording) return;
-      
-      const target = event.target;
-      const text = target.textContent?.toLowerCase() || '';
-      const className = target.className?.toLowerCase() || '';
-      
-      // More comprehensive button detection
-      const tradeKeywords = ['buy', 'sell', 'long', 'short', 'market', 'limit', 'stop', 'execute', 'submit', 'place order'];
-      const hasTradeKeyword = tradeKeywords.some(keyword => 
-        text.includes(keyword) || className.includes(keyword)
-      );
-      
-      if (hasTradeKeyword) {
-        console.log('🎯 Trade button clicked:', text);
-        setTimeout(() => this.captureTradeData('button_click'), 1000);
-      }
-    });
-  }
-
   monitorNetworkRequests() {
-    // Monitor for trade-related network requests
+    // Override fetch to monitor trade-related API calls
     const originalFetch = window.fetch;
     window.fetch = async (...args) => {
       const response = await originalFetch(...args);
@@ -219,9 +292,11 @@ class TradingViewCapture {
       
       try {
         const url = args[0]?.toString() || '';
-        if (url.includes('order') || url.includes('trade') || url.includes('position')) {
-          console.log('🌐 Trade-related network request:', url);
-          setTimeout(() => this.captureTradeData('network_request'), 1500);
+        const tradeKeywords = ['order', 'trade', 'position', 'execute', 'submit'];
+        
+        if (tradeKeywords.some(keyword => url.toLowerCase().includes(keyword))) {
+          console.log('🌐 Trade-related API call detected:', url);
+          setTimeout(() => this.captureTradeData('api_call'), 1500);
         }
       } catch (error) {
         console.log('Network monitoring error:', error);
@@ -231,10 +306,39 @@ class TradingViewCapture {
     };
   }
 
+  monitorClickEvents() {
+    document.addEventListener('click', (event) => {
+      if (!this.isRecording) return;
+      
+      const target = event.target;
+      const text = target.textContent?.toLowerCase() || '';
+      const className = target.className?.toLowerCase() || '';
+      const dataName = target.getAttribute('data-name')?.toLowerCase() || '';
+      
+      const tradeKeywords = [
+        'buy', 'sell', 'long', 'short', 'market', 'limit', 
+        'stop', 'execute', 'submit', 'place order', 'confirm'
+      ];
+      
+      const hasTradeKeyword = tradeKeywords.some(keyword => 
+        text.includes(keyword) || 
+        className.includes(keyword) || 
+        dataName.includes(keyword)
+      );
+      
+      if (hasTradeKeyword) {
+        console.log('🎯 Trade button clicked:', text, className, dataName);
+        setTimeout(() => this.captureTradeData('button_click'), 1000);
+      }
+    });
+  }
+
   checkForTradeExecution(node) {
-    // Check if the node indicates a trade execution
     const text = node.textContent?.toLowerCase() || '';
-    const executionKeywords = ['filled', 'executed', 'confirmed', 'submitted', 'order placed'];
+    const executionKeywords = [
+      'filled', 'executed', 'confirmed', 'submitted', 
+      'order placed', 'position opened', 'trade executed'
+    ];
     
     if (executionKeywords.some(keyword => text.includes(keyword))) {
       console.log('✅ Trade execution detected:', text);
@@ -242,12 +346,23 @@ class TradingViewCapture {
     }
   }
 
-  captureTradeFromPosition(nodes) {
-    // Extract trade data from new position entries
+  checkForOrderSubmission(nodes) {
     nodes.forEach(node => {
       if (node.nodeType === 1) {
-        const symbol = this.extractSymbolFromNode(node);
-        const price = this.extractPriceFromNode(node);
+        const text = node.textContent?.toLowerCase() || '';
+        if (text.includes('order') && text.includes('submitted')) {
+          console.log('📋 Order submission detected');
+          this.captureTradeData('order_submitted');
+        }
+      }
+    });
+  }
+
+  captureTradeFromPosition(nodes) {
+    nodes.forEach(node => {
+      if (node.nodeType === 1) {
+        const symbol = this.extractDataFromNode(node, 'symbol');
+        const price = this.extractDataFromNode(node, 'price');
         
         if (symbol || price) {
           console.log('📊 New position detected:', { symbol, price });
@@ -257,42 +372,28 @@ class TradingViewCapture {
     });
   }
 
-  extractSymbolFromNode(node) {
-    // Try to extract symbol from various node structures
-    const symbolSelectors = [
-      '[data-name="symbol"]',
-      '.symbol',
-      '.instrument',
-      '.ticker'
-    ];
+  extractDataFromNode(node, type) {
+    const selectors = {
+      symbol: [
+        '[data-name="symbol"]', '[data-name="legend-symbol-title"]',
+        '.symbol', '.instrument', '.ticker', '.symbol-name'
+      ],
+      price: [
+        '[data-name="price"]', '[data-name="legend-last-price"]',
+        '.price', '.entry-price', '.trade-price', '.last-price'
+      ]
+    };
     
-    for (const selector of symbolSelectors) {
+    for (const selector of selectors[type] || []) {
       const element = node.querySelector?.(selector) || 
                      (node.matches?.(selector) ? node : null);
       if (element) {
-        return element.textContent?.trim();
-      }
-    }
-    
-    return null;
-  }
-
-  extractPriceFromNode(node) {
-    // Try to extract price from various node structures
-    const priceSelectors = [
-      '[data-name="price"]',
-      '.price',
-      '.entry-price',
-      '.trade-price'
-    ];
-    
-    for (const selector of priceSelectors) {
-      const element = node.querySelector?.(selector) || 
-                     (node.matches?.(selector) ? node : null);
-      if (element) {
-        const priceText = element.textContent?.replace(/[^0-9.-]/g, '');
-        const price = parseFloat(priceText);
-        return isNaN(price) ? null : price;
+        const value = element.textContent?.trim();
+        if (type === 'price') {
+          const numericValue = parseFloat(value?.replace(/[^0-9.-]/g, ''));
+          return isNaN(numericValue) ? null : numericValue;
+        }
+        return value;
       }
     }
     
@@ -302,14 +403,23 @@ class TradingViewCapture {
   async captureTradeData(trigger = 'manual', additionalData = {}) {
     const tradeId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
-    // Prevent duplicate captures within 2 seconds
-    if (this.detectedTrades.has(trigger)) return;
-    this.detectedTrades.add(trigger);
-    setTimeout(() => this.detectedTrades.delete(trigger), 2000);
+    // Prevent duplicate captures within 3 seconds
+    const duplicateKey = `${trigger}-${this.getCurrentSymbol()}`;
+    if (this.detectedTrades.has(duplicateKey)) {
+      console.log('Duplicate trade detection prevented');
+      return;
+    }
+    
+    this.detectedTrades.add(duplicateKey);
+    setTimeout(() => this.detectedTrades.delete(duplicateKey), 3000);
 
+    console.log('📈 Capturing trade data with trigger:', trigger);
+
+    // Gather comprehensive trade data
     const symbol = additionalData.symbol || this.getCurrentSymbol();
     const price = additionalData.price || this.getCurrentPrice();
     const direction = this.getTradeDirection();
+    const timeframe = this.getCurrentTimeframe();
     
     // Capture screenshot
     let screenshotUrl = null;
@@ -323,6 +433,7 @@ class TradingViewCapture {
       id: tradeId,
       instrument: symbol,
       entry_price: price,
+      exit_price: price, // Same as entry for new trades
       direction: direction,
       platform: 'TradingView',
       trade_date: new Date().toISOString().split('T')[0],
@@ -331,19 +442,32 @@ class TradingViewCapture {
       trigger: trigger,
       screenshot_url: screenshotUrl,
       url: window.location.href,
-      chart_timeframe: this.getCurrentTimeframe(),
+      chart_timeframe: timeframe,
+      tag: direction, // For compatibility with database
+      notes: `Captured via ${trigger} on TradingView`,
+      synced: false,
       ...additionalData
     };
 
-    console.log('📈 Captured trade data:', tradeData);
+    console.log('💾 Captured trade data:', tradeData);
 
     // Send to background script
-    await chrome.runtime.sendMessage({
-      type: 'TRADE_DETECTED',
-      data: tradeData
-    });
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'TRADE_DETECTED',
+        data: tradeData
+      });
+      
+      this.showCaptureNotification(symbol, direction);
+      this.lastCapturedTrade = tradeData;
+    } catch (error) {
+      console.error('Failed to send trade data:', error);
+    }
+  }
 
-    this.showCaptureNotification(symbol, direction);
+  async captureManualTrade() {
+    console.log('📷 Manual trade capture initiated');
+    await this.captureTradeData('manual_capture');
   }
 
   async captureScreenshot() {
@@ -356,7 +480,6 @@ class TradingViewCapture {
   }
 
   getCurrentSymbol() {
-    // Enhanced symbol detection for TradingView
     const symbolSelectors = [
       '[data-name="legend-symbol-title"]',
       '.tv-symbol-header__symbol',
@@ -369,24 +492,27 @@ class TradingViewCapture {
       const element = document.querySelector(selector);
       if (element) {
         const symbol = element.textContent?.trim() || element.getAttribute('data-symbol');
-        if (symbol) return symbol;
+        if (symbol && symbol !== 'Symbol') return symbol;
       }
     }
     
-    // Try to extract from URL
+    // Extract from URL
     const urlMatch = window.location.href.match(/symbol=([^&]+)/);
     if (urlMatch) return decodeURIComponent(urlMatch[1]);
+    
+    // Extract from page title
+    const titleMatch = document.title.match(/^([A-Z]{3,6})\s/);
+    if (titleMatch) return titleMatch[1];
     
     return 'UNKNOWN';
   }
 
   getCurrentPrice() {
-    // Enhanced price detection
     const priceSelectors = [
       '[data-name="legend-last-price"]',
       '.tv-symbol-price-quote__value',
       '.last-price',
-      '[class*="price"]',
+      '[class*="price"]:not([class*="change"])',
       '[data-field="last_price"]'
     ];
     
@@ -395,7 +521,7 @@ class TradingViewCapture {
       if (element) {
         const priceText = element.textContent?.replace(/[^0-9.-]/g, '');
         const price = parseFloat(priceText);
-        if (!isNaN(price)) return price;
+        if (!isNaN(price) && price > 0) return price;
       }
     }
     
@@ -403,29 +529,38 @@ class TradingViewCapture {
   }
 
   getTradeDirection() {
-    // Try to detect if it's a buy or sell based on recent activity
-    const recentButtons = document.querySelectorAll('button');
-    for (const button of recentButtons) {
+    // Try to detect trade direction from recent UI interactions
+    const recentButtons = Array.from(document.querySelectorAll('button, [role="button"]'));
+    const recentClicks = recentButtons.slice(-10); // Check last 10 buttons
+    
+    for (const button of recentClicks) {
       const text = button.textContent?.toLowerCase() || '';
-      if (text.includes('buy') || text.includes('long')) return 'BUY';
-      if (text.includes('sell') || text.includes('short')) return 'SELL';
+      const className = button.className?.toLowerCase() || '';
+      
+      if (text.includes('buy') || text.includes('long') || className.includes('buy')) {
+        return 'BUY';
+      }
+      if (text.includes('sell') || text.includes('short') || className.includes('sell')) {
+        return 'SELL';
+      }
     }
+    
     return 'UNKNOWN';
   }
 
   getCurrentTimeframe() {
-    // Try to detect current chart timeframe
     const timeframeSelectors = [
       '[data-name="timeframe"]',
       '.tv-dropdown-behavior__button--active',
-      '.tv-screener-toolbar__item--active'
+      '.tv-screener-toolbar__item--active',
+      '[class*="timeframe"][class*="active"]'
     ];
     
     for (const selector of timeframeSelectors) {
       const element = document.querySelector(selector);
       if (element) {
         const timeframe = element.textContent?.trim();
-        if (timeframe) return timeframe;
+        if (timeframe && timeframe.match(/^\d+[mhdwMY]$/)) return timeframe;
       }
     }
     
@@ -433,13 +568,11 @@ class TradingViewCapture {
   }
 
   showRecordingStatus() {
-    // Remove existing notification
     const existing = document.getElementById('replay-locker-status');
     if (existing) existing.remove();
 
     if (!this.isRecording) return;
 
-    // Show recording indicator
     const indicator = document.createElement('div');
     indicator.id = 'replay-locker-status';
     indicator.innerHTML = `
@@ -459,7 +592,7 @@ class TradingViewCapture {
       ">
         🔴 Recording Trades
         <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">
-          Press Ctrl+Shift+R to toggle
+          Ctrl+Shift+R to toggle • Ctrl+Shift+S to capture
         </div>
       </div>
     `;
@@ -502,18 +635,11 @@ class TradingViewCapture {
     setTimeout(() => {
       notification.style.animation = 'slideIn 0.3s ease-out reverse';
       setTimeout(() => notification.remove(), 300);
-    }, 3000);
+    }, 4000);
   }
 
   showNotification(title, message) {
-    if (chrome.notifications) {
-      chrome.notifications.create({
-        type: 'basic',
-        iconUrl: 'icons/icon48.png',
-        title,
-        message
-      });
-    }
+    console.log(`${title}: ${message}`);
   }
 }
 
