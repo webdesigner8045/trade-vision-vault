@@ -1,9 +1,10 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, TrendingUp, TrendingDown, FileText, Tag, Play, Video, Image } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Calendar, TrendingUp, TrendingDown, FileText, Tag, Play, Video, Image, X } from 'lucide-react';
 import { useTradeReplays } from '@/hooks/useTradeReplays';
 
 interface DashboardProps {
@@ -12,6 +13,7 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ onNewReplay }) => {
   const { trades, loading } = useTradeReplays();
+  const [selectedRecording, setSelectedRecording] = useState<{url: string, type: string} | null>(null);
 
   if (loading) {
     return (
@@ -58,7 +60,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewReplay }) => {
   };
 
   const handleRecordingClick = (recordingUrl: string) => {
-    window.open(recordingUrl, '_blank');
+    if (isVideoFile(recordingUrl)) {
+      setSelectedRecording({url: recordingUrl, type: 'video'});
+    } else if (isImageFile(recordingUrl)) {
+      setSelectedRecording({url: recordingUrl, type: 'image'});
+    } else {
+      window.open(recordingUrl, '_blank');
+    }
   };
 
   return (
@@ -204,6 +212,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewReplay }) => {
           )}
         </CardContent>
       </Card>
+
+      {/* Recording Modal */}
+      <Dialog open={!!selectedRecording} onOpenChange={() => setSelectedRecording(null)}>
+        <DialogContent className="bg-gray-800 border-gray-700 max-w-4xl max-h-[90vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              {selectedRecording?.type === 'video' ? 'Video Recording' : 'Chart Screenshot'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center items-center p-4">
+            {selectedRecording?.type === 'video' ? (
+              <video 
+                controls 
+                className="w-full max-w-full rounded-lg"
+                autoPlay
+              >
+                <source src={selectedRecording.url} />
+                Your browser does not support the video tag.
+              </video>
+            ) : selectedRecording?.type === 'image' ? (
+              <img 
+                src={selectedRecording.url} 
+                alt="Trade chart or screenshot"
+                className="w-full max-w-full rounded-lg object-contain"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
