@@ -14,6 +14,9 @@
   "host_permissions": [
     "https://www.tradingview.com/*",
     "https://tradingview.com/*",
+    "https://trader.tradovate.com/*",
+    "https://www.tradovate.com/*",
+    "https://tradovate.com/*",
     "https://*.mt4web.com/*",
     "https://*.mt5web.com/*",
     "https://*.fxpro.com/*",
@@ -44,6 +47,9 @@
     },
     {
       "matches": [
+        "https://trader.tradovate.com/*",
+        "https://www.tradovate.com/*",
+        "https://tradovate.com/*",
         "https://*.mt4web.com/*",
         "https://*.mt5web.com/*",
         "https://*.fxpro.com/*",

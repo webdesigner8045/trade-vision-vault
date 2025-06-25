@@ -1,4 +1,3 @@
-
 // Enhanced content script for MT4/MT5 and broker platforms
 class BrokerPlatformCapture {
   constructor() {
@@ -48,6 +47,7 @@ class BrokerPlatformCapture {
     const url = window.location.href.toLowerCase();
     
     if (hostname.includes('tradingview')) return 'TradingView';
+    if (hostname.includes('tradovate')) return 'Tradovate';
     if (hostname.includes('mt4') || url.includes('mt4')) return 'MT4';
     if (hostname.includes('mt5') || url.includes('mt5')) return 'MT5';
     if (hostname.includes('fxpro')) return 'FxPro';
@@ -70,15 +70,78 @@ class BrokerPlatformCapture {
     this.monitorFormSubmissions();
     this.monitorDOMChanges();
     this.monitorNetworkRequests();
+    
+    // Tradovate specific setup
+    if (this.platform === 'Tradovate') {
+      this.setupTradovateSpecific();
+    }
   }
 
-  startTradeDetection() {
-    console.log(`🔴 ${this.platform} trade detection started`);
-    this.setupTradeDetection();
+  setupTradovateSpecific() {
+    // Tradovate-specific trade detection
+    console.log('🎯 Setting up Tradovate-specific detection');
+    
+    // Monitor for Tradovate order buttons
+    this.monitorTradovateButtons();
+    
+    // Monitor for position changes
+    this.monitorTradovatePositions();
   }
 
-  stopTradeDetection() {
-    console.log(`⏹️ ${this.platform} trade detection stopped`);
+  monitorTradovateButtons() {
+    // Look for Tradovate buy/sell buttons
+    const checkForTradovateButtons = () => {
+      const buttons = document.querySelectorAll('button, [role="button"]');
+      buttons.forEach(button => {
+        const text = button.textContent?.toLowerCase() || '';
+        const className = button.className?.toLowerCase() || '';
+        
+        // Tradovate specific button patterns
+        if ((text.includes('buy') || text.includes('sell') || 
+             text.includes('market') || text.includes('limit') ||
+             className.includes('buy') || className.includes('sell')) &&
+            !button.dataset.replayLockerListening) {
+          
+          button.dataset.replayLockerListening = 'true';
+          button.addEventListener('click', () => {
+            if (this.isRecording) {
+              console.log('🎯 Tradovate trade button clicked:', text);
+              setTimeout(() => this.captureTradeData('tradovate_button'), 1000);
+            }
+          });
+        }
+      });
+    };
+    
+    // Check immediately and then periodically
+    checkForTradovateButtons();
+    setInterval(checkForTradovateButtons, 2000);
+  }
+
+  monitorTradovatePositions() {
+    // Monitor for position table changes
+    const observer = new MutationObserver((mutations) => {
+      if (!this.isRecording) return;
+      
+      mutations.forEach(mutation => {
+        // Look for position table updates
+        if (mutation.target.closest && 
+            (mutation.target.closest('[class*="position"]') ||
+             mutation.target.closest('[class*="order"]') ||
+             mutation.target.closest('table'))) {
+          
+          console.log('📊 Tradovate position/order change detected');
+          setTimeout(() => this.captureTradeData('tradovate_position_change'), 500);
+        }
+      });
+    });
+
+    observer.observe(document.body, { 
+      childList: true, 
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'data-*']
+    });
   }
 
   monitorClickEvents() {
@@ -270,6 +333,13 @@ class BrokerPlatformCapture {
   getCurrentSymbol() {
     // Platform-specific symbol selectors
     const symbolSelectors = {
+      'Tradovate': [
+        '[class*="symbol"]', 
+        '[class*="instrument"]', 
+        '.contract-name',
+        '[data-symbol]',
+        '.ticker'
+      ],
       'MT4': ['.symbol', '.instrument', '[class*="symbol"]'],
       'MT5': ['.symbol', '.instrument', '[class*="symbol"]'],
       'FxPro': ['.symbol', '.currency-pair', '.instrument'],
@@ -290,8 +360,20 @@ class BrokerPlatformCapture {
       const elements = document.querySelectorAll(selector);
       for (const element of elements) {
         const symbol = element.textContent?.trim();
-        if (symbol && symbol.length > 2) return symbol;
+        if (symbol && symbol.length > 1) return symbol;
       }
+    }
+    
+    // For Tradovate, try to extract from URL or page content
+    if (this.platform === 'Tradovate') {
+      // Look in the URL
+      const urlMatch = window.location.href.match(/contract[=/]([^&/?]+)/i);
+      if (urlMatch) return urlMatch[1];
+      
+      // Look for futures symbols (e.g., ESU3, NQU3)
+      const pageText = document.body.textContent || '';
+      const futuresMatch = pageText.match(/\b[A-Z]{1,3}[FGHJKMNQUVXZ]\d{1,2}\b/);
+      if (futuresMatch) return futuresMatch[0];
     }
     
     // Try to extract from URL or page title
@@ -302,11 +384,12 @@ class BrokerPlatformCapture {
   }
 
   getCurrentPrice() {
-    // Platform-specific price selectors
+    // Platform-specific price selectors with Tradovate support
     const priceSelectors = [
       '.price', '.rate', '.quote', '.bid', '.ask',
       '[class*="price"]', '[class*="rate"]', '[class*="quote"]',
-      '.last-price', '.current-price', '.market-price'
+      '.last-price', '.current-price', '.market-price',
+      '.last', '.mark', '.settlement' // Tradovate specific
     ];
     
     for (const selector of priceSelectors) {

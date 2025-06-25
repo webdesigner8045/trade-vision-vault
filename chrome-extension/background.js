@@ -66,6 +66,7 @@ class ExtensionBackground {
     // Check if we should inject content script
     const supportedDomains = [
       'tradingview.com',
+      'tradovate.com',
       'mt4web.com',
       'mt5web.com',
       'fxpro.com',
@@ -94,12 +95,12 @@ class ExtensionBackground {
               files: ['content-tradingview.js']
             });
             console.log('TradingView content script injected');
-          } else if (url.includes('mt4') || url.includes('mt5')) {
+          } else if (url.includes('tradovate.com') || url.includes('mt4') || url.includes('mt5')) {
             await chrome.scripting.executeScript({
               target: { tabId },
               files: ['content-mt4.js']
             });
-            console.log('MT4/MT5 content script injected');
+            console.log('Tradovate/MT4/MT5 content script injected');
           }
         }
       } catch (error) {
