@@ -3,7 +3,7 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, TrendingUp, TrendingDown, FileText, Tag, Play } from 'lucide-react';
+import { Calendar, TrendingUp, TrendingDown, FileText, Tag, Play, Video, Image } from 'lucide-react';
 import { useTradeReplays } from '@/hooks/useTradeReplays';
 
 interface DashboardProps {
@@ -47,6 +47,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewReplay }) => {
       return pnl.toFixed(0);
     }
     return trade.instrument.includes('JPY') ? (pnl * 100).toFixed(0) : (pnl * 10000).toFixed(0);
+  };
+
+  const isVideoFile = (url: string) => {
+    return url.match(/\.(mp4|webm|ogg|mov|avi)$/i);
+  };
+
+  const isImageFile = (url: string) => {
+    return url.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i);
+  };
+
+  const handleRecordingClick = (recordingUrl: string) => {
+    window.open(recordingUrl, '_blank');
   };
 
   return (
@@ -143,9 +155,30 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewReplay }) => {
                       {trade.tag}
                     </Badge>
                     {trade.recording_url && (
-                      <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30" variant="outline">
-                        <Play className="w-3 h-3 mr-1" />
-                        Recording
+                      <Badge 
+                        className="bg-blue-500/20 text-blue-400 border-blue-500/30 cursor-pointer hover:bg-blue-500/30 transition-colors" 
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRecordingClick(trade.recording_url!);
+                        }}
+                      >
+                        {isVideoFile(trade.recording_url) ? (
+                          <>
+                            <Video className="w-3 h-3 mr-1" />
+                            Video
+                          </>
+                        ) : isImageFile(trade.recording_url) ? (
+                          <>
+                            <Image className="w-3 h-3 mr-1" />
+                            Image
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3 h-3 mr-1" />
+                            Recording
+                          </>
+                        )}
                       </Badge>
                     )}
                   </div>
