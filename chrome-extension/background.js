@@ -1,17 +1,32 @@
-
-// Enhanced background service worker
+// Enhanced background service worker with better connection handling
 class ExtensionBackground {
   constructor() {
     this.supabaseClient = null;
+    this.activeConnections = new Set();
     this.initializeListeners();
     this.initializeSupabase();
   }
 
   initializeListeners() {
-    // Listen for messages from content scripts
+    // Listen for messages from content scripts with better error handling
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      this.handleMessage(message, sender, sendResponse);
+      // Ensure we always respond to prevent "receiver end does not exist" errors
+      this.handleMessage(message, sender, sendResponse).catch(error => {
+        console.error('Message handling error:', error);
+        sendResponse({ error: error.message });
+      });
       return true; // Keep channel open for async response
+    });
+
+    // Listen for connection attempts
+    chrome.runtime.onConnect.addListener((port) => {
+      console.log('Connection established:', port.name);
+      this.activeConnections.add(port);
+      
+      port.onDisconnect.addListener(() => {
+        console.log('Connection closed:', port.name);
+        this.activeConnections.delete(port);
+      });
     });
 
     // Listen for extension installation
@@ -26,12 +41,16 @@ class ExtensionBackground {
         this.injectContentScriptIfNeeded(tabId, tab.url);
       }
     });
+
+    // Handle startup
+    chrome.runtime.onStartup.addListener(() => {
+      console.log('Extension started');
+      this.initializeSupabase();
+    });
   }
 
   async initializeSupabase() {
-    // Initialize Supabase client for syncing
     try {
-      // Create a simple client without external imports
       this.supabaseClient = {
         url: 'https://akhcugmczkfxrhzuadlo.supabase.co',
         key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFraGN1Z21jemtmeHJoenVhZGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4MDM3MTMsImV4cCI6MjA2NjM3OTcxM30.G93cLEdFV4yngYmr7KbDG2IP9Z2WuGBS_Ug3AVXdrt4'
@@ -43,7 +62,6 @@ class ExtensionBackground {
   }
 
   async setupDefaultSettings() {
-    // Set default settings
     await chrome.storage.local.set({
       isRecording: false,
       autoSync: true,
@@ -63,7 +81,6 @@ class ExtensionBackground {
   }
 
   async injectContentScriptIfNeeded(tabId, url) {
-    // Check if we should inject content script
     const supportedDomains = [
       'tradingview.com',
       'tradovate.com',
@@ -81,26 +98,28 @@ class ExtensionBackground {
     
     if (shouldInject) {
       try {
+        // Add delay to ensure page is fully loaded
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
         // Check if content script is already injected
         const results = await chrome.scripting.executeScript({
           target: { tabId },
           func: () => !!window.replayLockerInjected
-        });
+        }).catch(() => [{ result: false }]);
 
         if (!results[0].result) {
-          // Inject appropriate content script
           if (url.includes('tradingview.com')) {
             await chrome.scripting.executeScript({
               target: { tabId },
               files: ['content-tradingview.js']
             });
-            console.log('TradingView content script injected');
-          } else if (url.includes('tradovate.com') || url.includes('mt4') || url.includes('mt5')) {
+            console.log('TradingView content script injected into tab:', tabId);
+          } else {
             await chrome.scripting.executeScript({
               target: { tabId },
               files: ['content-mt4.js']
             });
-            console.log('Tradovate/MT4/MT5 content script injected');
+            console.log('Trading platform content script injected into tab:', tabId);
           }
         }
       } catch (error) {
@@ -111,6 +130,8 @@ class ExtensionBackground {
 
   async handleMessage(message, sender, sendResponse) {
     try {
+      console.log('Received message:', message.type, 'from tab:', sender.tab?.id);
+      
       switch (message.type) {
         case 'TRADE_DETECTED':
           await this.handleTradeDetection(message.data, sender.tab);
@@ -162,7 +183,12 @@ class ExtensionBackground {
           sendResponse(exportData);
           break;
 
+        case 'PING':
+          sendResponse({ success: true, timestamp: Date.now() });
+          break;
+
         default:
+          console.warn('Unknown message type:', message.type);
           sendResponse({ error: 'Unknown message type' });
       }
     } catch (error) {
@@ -174,7 +200,6 @@ class ExtensionBackground {
   async handleTradeDetection(tradeData, tab) {
     console.log('📈 Handling trade detection:', tradeData);
     
-    // Store trade data locally
     const trades = await this.getStoredTrades();
     const newTrade = {
       id: tradeData.id || Date.now().toString(),
@@ -188,10 +213,8 @@ class ExtensionBackground {
     trades.push(newTrade);
     await chrome.storage.local.set({ trades });
 
-    // Show notification badge
     this.showTradeNotification();
     
-    // Auto-sync if enabled and user is authenticated
     const settings = await chrome.storage.local.get(['autoSync', 'user']);
     if (settings.autoSync && settings.user && this.supabaseClient) {
       try {
@@ -211,7 +234,6 @@ class ExtensionBackground {
         quality: 80
       });
       
-      // Store screenshot with trade reference
       const screenshot = {
         id: Date.now().toString(),
         dataUrl,
@@ -233,16 +255,15 @@ class ExtensionBackground {
   async toggleRecording(isRecording) {
     await chrome.storage.local.set({ isRecording });
     
-    // Notify all content scripts
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
       try {
-        chrome.tabs.sendMessage(tab.id, {
+        await chrome.tabs.sendMessage(tab.id, {
           type: 'TOGGLE_RECORDING',
           isRecording
         });
       } catch (error) {
-        // Tab might not have content script
+        // Tab might not have content script, ignore
       }
     }
   }
@@ -265,7 +286,6 @@ class ExtensionBackground {
     }
 
     try {
-      // Convert trades to Supabase format
       const tradesToSync = unsyncedTrades.map(trade => ({
         user_id: user.user.id,
         instrument: trade.instrument || 'UNKNOWN',
@@ -279,7 +299,6 @@ class ExtensionBackground {
         chart_url: trade.url
       }));
 
-      // Use fetch API to insert trades
       const response = await fetch(`${this.supabaseClient.url}/rest/v1/trade_replays`, {
         method: 'POST',
         headers: {
@@ -296,7 +315,6 @@ class ExtensionBackground {
         throw new Error(`Sync failed: ${response.status} ${errorText}`);
       }
 
-      // Mark trades as synced
       const syncedTrades = trades.map(trade => 
         unsyncedTrades.find(unsynced => unsynced.id === trade.id) 
           ? { ...trade, synced: true }
@@ -347,7 +365,6 @@ class ExtensionBackground {
       });
 
       if (response.ok) {
-        // Mark as synced
         const trades = await this.getStoredTrades();
         const updatedTrades = trades.map(t => 
           t.id === trade.id ? { ...t, synced: true } : t
@@ -408,16 +425,13 @@ class ExtensionBackground {
   }
 
   showTradeNotification() {
-    // Update extension badge
     chrome.action.setBadgeText({ text: '!' });
     chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
     
-    // Clear badge after 5 seconds
     setTimeout(() => {
       chrome.action.setBadgeText({ text: '' });
     }, 5000);
 
-    // Show system notification if enabled
     chrome.storage.local.get('enableNotifications').then(result => {
       if (result.enableNotifications !== false) {
         chrome.notifications.create({

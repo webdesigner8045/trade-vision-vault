@@ -1,497 +1,566 @@
-// Enhanced content script for MT4/MT5 and broker platforms
-class BrokerPlatformCapture {
-  constructor() {
-    this.isRecording = false;
-    this.detectedTrades = new Set();
-    this.platform = this.detectPlatform();
-    this.init();
-  }
 
-  async init() {
-    console.log(`🚀 ${this.platform} Capture initialized`);
-    
-    // Mark as injected
-    window.replayLockerInjected = true;
-    
-    // Get recording status
-    try {
-      const response = await chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATUS' });
-      this.isRecording = response?.isRecording || false;
-    } catch (error) {
-      console.log('Could not get recording status:', error);
+// Enhanced MT4/MT5/Tradovate content script with better error handling
+(function() {
+  'use strict';
+
+  // Prevent multiple injections
+  if (window.replayLockerInjected) {
+    console.log('Replay Locker already injected');
+    return;
+  }
+  window.replayLockerInjected = true;
+
+  console.log('🚀 Replay Locker MT4/MT5/Tradovate content script loaded on:', window.location.href);
+
+  class TradingPlatformCapture {
+    constructor() {
+      this.isRecording = false;
+      this.lastTrade = null;
+      this.observers = [];
+      this.platform = this.detectPlatform();
+      this.init();
     }
-    
-    // Listen for recording toggle
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.type === 'TOGGLE_RECORDING') {
-        this.isRecording = message.isRecording;
-        this.showRecordingStatus();
-        if (this.isRecording) {
-          this.startTradeDetection();
-        } else {
-          this.stopTradeDetection();
-        }
+
+    detectPlatform() {
+      const url = window.location.href.toLowerCase();
+      if (url.includes('tradovate')) return 'Tradovate';
+      if (url.includes('mt4')) return 'MT4';
+      if (url.includes('mt5')) return 'MT5';
+      if (url.includes('fxpro')) return 'FXPro';
+      if (url.includes('oanda')) return 'OANDA';
+      if (url.includes('ig.com')) return 'IG';
+      if (url.includes('etoro')) return 'eToro';
+      if (url.includes('plus500')) return 'Plus500';
+      if (url.includes('avatrade')) return 'AvaTrade';
+      return 'Unknown Platform';
+    }
+
+    async init() {
+      console.log(`Initializing ${this.platform} capture...`);
+      
+      try {
+        // Test connection to background script
+        await this.sendMessage({ type: 'PING' });
+        console.log('Background script connection established');
+      } catch (error) {
+        console.error('Failed to connect to background script:', error);
+        // Retry connection after delay
+        setTimeout(() => this.init(), 2000);
+        return;
       }
-    });
 
-    this.setupTradeDetection();
-    this.showRecordingStatus();
-    
-    if (this.isRecording) {
-      this.startTradeDetection();
+      await this.getRecordingStatus();
+      this.setupUI();
+      this.setupTradeDetection();
+      this.setupKeyboardShortcuts();
+      this.setupMessageListener();
+      
+      console.log(`${this.platform} capture initialized successfully`);
     }
-  }
 
-  detectPlatform() {
-    const hostname = window.location.hostname.toLowerCase();
-    const url = window.location.href.toLowerCase();
-    
-    if (hostname.includes('tradingview')) return 'TradingView';
-    if (hostname.includes('tradovate')) return 'Tradovate';
-    if (hostname.includes('mt4') || url.includes('mt4')) return 'MT4';
-    if (hostname.includes('mt5') || url.includes('mt5')) return 'MT5';
-    if (hostname.includes('fxpro')) return 'FxPro';
-    if (hostname.includes('oanda')) return 'OANDA';
-    if (hostname.includes('ig.com')) return 'IG';
-    if (hostname.includes('etoro')) return 'eToro';
-    if (hostname.includes('plus500')) return 'Plus500';
-    if (hostname.includes('avatrade')) return 'AvaTrade';
-    if (hostname.includes('fxtm')) return 'FXTM';
-    if (hostname.includes('xm.com')) return 'XM';
-    if (hostname.includes('pepperstone')) return 'Pepperstone';
-    if (hostname.includes('forex.com')) return 'Forex.com';
-    
-    return 'Unknown Broker';
-  }
-
-  setupTradeDetection() {
-    // Monitor for trade-related activities
-    this.monitorClickEvents();
-    this.monitorFormSubmissions();
-    this.monitorDOMChanges();
-    this.monitorNetworkRequests();
-    
-    // Tradovate specific setup
-    if (this.platform === 'Tradovate') {
-      this.setupTradovateSpecific();
-    }
-  }
-
-  setupTradovateSpecific() {
-    // Tradovate-specific trade detection
-    console.log('🎯 Setting up Tradovate-specific detection');
-    
-    // Monitor for Tradovate order buttons
-    this.monitorTradovateButtons();
-    
-    // Monitor for position changes
-    this.monitorTradovatePositions();
-  }
-
-  monitorTradovateButtons() {
-    // Look for Tradovate buy/sell buttons
-    const checkForTradovateButtons = () => {
-      const buttons = document.querySelectorAll('button, [role="button"]');
-      buttons.forEach(button => {
-        const text = button.textContent?.toLowerCase() || '';
-        const className = button.className?.toLowerCase() || '';
-        
-        // Tradovate specific button patterns
-        if ((text.includes('buy') || text.includes('sell') || 
-             text.includes('market') || text.includes('limit') ||
-             className.includes('buy') || className.includes('sell')) &&
-            !button.dataset.replayLockerListening) {
-          
-          button.dataset.replayLockerListening = 'true';
-          button.addEventListener('click', () => {
-            if (this.isRecording) {
-              console.log('🎯 Tradovate trade button clicked:', text);
-              setTimeout(() => this.captureTradeData('tradovate_button'), 1000);
+    async sendMessage(message) {
+      return new Promise((resolve, reject) => {
+        try {
+          chrome.runtime.sendMessage(message, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (response && response.error) {
+              reject(new Error(response.error));
+            } else {
+              resolve(response);
             }
           });
+        } catch (error) {
+          reject(error);
         }
       });
-    };
-    
-    // Check immediately and then periodically
-    checkForTradovateButtons();
-    setInterval(checkForTradovateButtons, 2000);
-  }
+    }
 
-  monitorTradovatePositions() {
-    // Monitor for position table changes
-    const observer = new MutationObserver((mutations) => {
-      if (!this.isRecording) return;
-      
-      mutations.forEach(mutation => {
-        // Look for position table updates
-        if (mutation.target.closest && 
-            (mutation.target.closest('[class*="position"]') ||
-             mutation.target.closest('[class*="order"]') ||
-             mutation.target.closest('table'))) {
-          
-          console.log('📊 Tradovate position/order change detected');
-          setTimeout(() => this.captureTradeData('tradovate_position_change'), 500);
-        }
-      });
-    });
-
-    observer.observe(document.body, { 
-      childList: true, 
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class', 'data-*']
-    });
-  }
-
-  monitorClickEvents() {
-    document.addEventListener('click', (event) => {
-      if (!this.isRecording) return;
-      
-      const target = event.target;
-      const text = target.textContent?.toLowerCase() || '';
-      const className = target.className?.toLowerCase() || '';
-      const id = target.id?.toLowerCase() || '';
-      
-      // Common trade button patterns across platforms
-      const tradeKeywords = [
-        'buy', 'sell', 'long', 'short', 'execute', 'submit', 'place',
-        'order', 'trade', 'open', 'close', 'confirm', 'send'
-      ];
-      
-      const isTradeButton = tradeKeywords.some(keyword => 
-        text.includes(keyword) || 
-        className.includes(keyword) || 
-        id.includes(keyword)
-      );
-      
-      if (isTradeButton) {
-        console.log(`🎯 ${this.platform} trade button clicked:`, text);
-        setTimeout(() => this.captureTradeData('button_click'), 1000);
-      }
-    });
-  }
-
-  monitorFormSubmissions() {
-    document.addEventListener('submit', (event) => {
-      if (!this.isRecording) return;
-      
-      const form = event.target;
-      const formData = new FormData(form);
-      const hasTradeData = this.checkFormForTradeData(formData);
-      
-      if (hasTradeData) {
-        console.log(`📋 ${this.platform} trade form submitted`);
-        setTimeout(() => this.captureTradeData('form_submit'), 500);
-      }
-    });
-  }
-
-  checkFormForTradeData(formData) {
-    const tradeFields = [
-      'symbol', 'instrument', 'pair', 'asset',
-      'volume', 'lot', 'amount', 'quantity',
-      'price', 'rate', 'level',
-      'buy', 'sell', 'order_type'
-    ];
-    
-    for (const [key] of formData.entries()) {
-      if (tradeFields.some(field => key.toLowerCase().includes(field))) {
-        return true;
+    async getRecordingStatus() {
+      try {
+        const response = await this.sendMessage({ type: 'GET_RECORDING_STATUS' });
+        this.isRecording = response.isRecording || false;
+        console.log('Recording status:', this.isRecording);
+      } catch (error) {
+        console.error('Failed to get recording status:', error);
+        this.isRecording = false;
       }
     }
-    
-    return false;
-  }
 
-  monitorDOMChanges() {
-    const observer = new MutationObserver((mutations) => {
-      if (!this.isRecording) return;
+    setupUI() {
+      // Create recording indicator
+      const indicator = document.createElement('div');
+      indicator.id = 'replay-locker-indicator';
+      indicator.style.cssText = `
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        z-index: 10000;
+        background: ${this.isRecording ? '#10b981' : '#6b7280'};
+        color: white;
+        padding: 8px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        user-select: none;
+      `;
+      indicator.innerHTML = `
+        <span style="display: inline-block; width: 8px; height: 8px; background: white; border-radius: 50%; margin-right: 6px;"></span>
+        ${this.isRecording ? 'Recording' : 'Paused'} | ${this.platform}
+      `;
       
-      mutations.forEach(mutation => {
-        mutation.addedNodes.forEach(node => {
-          if (node.nodeType === 1) {
-            this.checkForTradeConfirmation(node);
+      indicator.addEventListener('click', () => this.toggleRecording());
+      document.body.appendChild(indicator);
+
+      // Create trade capture button for specific platforms
+      if (this.platform === 'Tradovate') {
+        this.createTradovateButton();
+      }
+    }
+
+    createTradovateButton() {
+      // Wait for Tradovate UI to load
+      setTimeout(() => {
+        const toolbar = document.querySelector('.toolbar') || 
+                      document.querySelector('[class*="toolbar"]') ||
+                      document.querySelector('.header') ||
+                      document.querySelector('[class*="header"]');
+        
+        if (toolbar) {
+          const button = document.createElement('button');
+          button.innerHTML = '📈 Record Trade';
+          button.style.cssText = `
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-left: 8px;
+            transition: background 0.2s;
+          `;
+          
+          button.addEventListener('click', () => this.captureManualTrade());
+          button.addEventListener('mouseenter', () => {
+            button.style.background = '#059669';
+          });
+          button.addEventListener('mouseleave', () => {
+            button.style.background = '#10b981';
+          });
+          
+          toolbar.appendChild(button);
+          console.log('Tradovate record button added');
+        }
+      }, 3000);
+    }
+
+    setupTradeDetection() {
+      console.log(`Setting up ${this.platform} trade detection...`);
+
+      // Enhanced selectors for different platforms
+      const tradeSelectors = {
+        'Tradovate': [
+          'button[data-testid*="buy"]',
+          'button[data-testid*="sell"]',
+          'button[class*="buy"]',
+          'button[class*="sell"]',
+          '.buy-button',
+          '.sell-button',
+          '[class*="order-button"]',
+          '[class*="trade-button"]'
+        ],
+        'MT4': [
+          '.buy-button',
+          '.sell-button',
+          'button[onclick*="buy"]',
+          'button[onclick*="sell"]',
+          '[class*="order"]'
+        ],
+        'MT5': [
+          '.buy-button',
+          '.sell-button',
+          'button[onclick*="buy"]',
+          'button[onclick*="sell"]',
+          '[class*="order"]'
+        ]
+      };
+
+      const selectors = tradeSelectors[this.platform] || tradeSelectors['Tradovate'];
+      
+      // Monitor for button clicks
+      selectors.forEach(selector => {
+        this.addClickListener(selector);
+      });
+
+      // Monitor DOM changes for dynamic content
+      this.setupDOMObserver();
+
+      // Monitor for position changes
+      this.monitorPositions();
+    }
+
+    addClickListener(selector) {
+      document.addEventListener('click', (event) => {
+        if (!this.isRecording) return;
+        
+        const target = event.target.closest(selector);
+        if (target) {
+          console.log('Trade button clicked:', selector, target);
+          setTimeout(() => this.detectTradeFromClick(target), 500);
+        }
+      }, true);
+    }
+
+    setupDOMObserver() {
+      const observer = new MutationObserver((mutations) => {
+        if (!this.isRecording) return;
+        
+        mutations.forEach(mutation => {
+          // Check for new trade-related elements
+          if (mutation.addedNodes.length > 0) {
+            mutation.addedNodes.forEach(node => {
+              if (node.nodeType === Node.ELEMENT_NODE) {
+                this.checkForTradeElements(node);
+              }
+            });
           }
         });
       });
-    });
 
-    observer.observe(document.body, { 
-      childList: true, 
-      subtree: true 
-    });
-  }
-
-  checkForTradeConfirmation(node) {
-    const text = node.textContent?.toLowerCase() || '';
-    const confirmationKeywords = [
-      'order executed', 'trade opened', 'position opened',
-      'order filled', 'trade confirmed', 'execution successful',
-      'order placed', 'trade successful', 'position created'
-    ];
-    
-    if (confirmationKeywords.some(keyword => text.includes(keyword))) {
-      console.log(`✅ ${this.platform} trade confirmation detected:`, text);
-      this.captureTradeData('confirmation_detected');
-    }
-  }
-
-  monitorNetworkRequests() {
-    // Override fetch for API monitoring
-    const originalFetch = window.fetch;
-    window.fetch = async (...args) => {
-      const response = await originalFetch(...args);
-      
-      if (!this.isRecording) return response;
-      
-      try {
-        const url = args[0]?.toString().toLowerCase() || '';
-        const tradeEndpoints = [
-          'order', 'trade', 'position', 'execute', 'place',
-          'buy', 'sell', 'open', 'close'
-        ];
-        
-        if (tradeEndpoints.some(endpoint => url.includes(endpoint))) {
-          console.log(`🌐 ${this.platform} trade API call:`, url);
-          setTimeout(() => this.captureTradeData('api_call'), 1500);
-        }
-      } catch (error) {
-        console.log('Network monitoring error:', error);
-      }
-      
-      return response;
-    };
-  }
-
-  async captureTradeData(trigger = 'manual') {
-    const tradeId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Prevent duplicate captures
-    const duplicateKey = `${trigger}-${this.getCurrentSymbol()}`;
-    if (this.detectedTrades.has(duplicateKey)) return;
-    
-    this.detectedTrades.add(duplicateKey);
-    setTimeout(() => this.detectedTrades.delete(duplicateKey), 3000);
-
-    console.log(`📈 Capturing ${this.platform} trade data`);
-
-    const symbol = this.getCurrentSymbol();
-    const price = this.getCurrentPrice();
-    const direction = this.getTradeDirection();
-    
-    // Capture screenshot
-    let screenshotUrl = null;
-    try {
-      screenshotUrl = await this.captureScreenshot();
-    } catch (error) {
-      console.log('Screenshot capture failed:', error);
-    }
-    
-    const tradeData = {
-      id: tradeId,
-      instrument: symbol,
-      entry_price: price,
-      exit_price: price,
-      direction: direction,
-      platform: this.platform,
-      trade_date: new Date().toISOString().split('T')[0],
-      trade_time: new Date().toTimeString().split(' ')[0],
-      timestamp: new Date().toISOString(),
-      trigger: trigger,
-      screenshot_url: screenshotUrl,
-      url: window.location.href,
-      tag: direction,
-      notes: `Captured from ${this.platform} via ${trigger}`,
-      synced: false
-    };
-
-    console.log(`💾 ${this.platform} trade data captured:`, tradeData);
-
-    // Send to background script
-    try {
-      await chrome.runtime.sendMessage({
-        type: 'TRADE_DETECTED',
-        data: tradeData
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'data-testid']
       });
+
+      this.observers.push(observer);
+    }
+
+    checkForTradeElements(element) {
+      // Look for position tables, order confirmations, etc.
+      const tradeIndicators = [
+        'position',
+        'order',
+        'trade',
+        'execution',
+        'fill',
+        'confirmation'
+      ];
+
+      const className = element.className || '';
+      const textContent = element.textContent || '';
       
-      this.showCaptureNotification(symbol, direction);
-    } catch (error) {
-      console.error('Failed to send trade data:', error);
-    }
-  }
-
-  async captureScreenshot() {
-    try {
-      return await chrome.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
-    } catch (error) {
-      console.error('Screenshot capture failed:', error);
-      return null;
-    }
-  }
-
-  getCurrentSymbol() {
-    // Platform-specific symbol selectors
-    const symbolSelectors = {
-      'Tradovate': [
-        '[class*="symbol"]', 
-        '[class*="instrument"]', 
-        '.contract-name',
-        '[data-symbol]',
-        '.ticker'
-      ],
-      'MT4': ['.symbol', '.instrument', '[class*="symbol"]'],
-      'MT5': ['.symbol', '.instrument', '[class*="symbol"]'],
-      'FxPro': ['.symbol', '.currency-pair', '.instrument'],
-      'OANDA': ['.instrument', '.symbol', '[data-symbol]'],
-      'IG': ['.epic', '.market', '.instrument'],
-      'eToro': ['.symbol', '.instrument', '.asset'],
-      'Plus500': ['.instrument', '.symbol', '.asset'],
-      'AvaTrade': ['.symbol', '.instrument', '.pair'],
-      'FXTM': ['.symbol', '.instrument', '.currency'],
-      'XM': ['.symbol', '.instrument', '.pair'],
-      'Pepperstone': ['.symbol', '.instrument', '.pair'],
-      'Forex.com': ['.symbol', '.instrument', '.pair']
-    };
-
-    const selectors = symbolSelectors[this.platform] || ['.symbol', '.instrument', '.pair'];
-    
-    for (const selector of selectors) {
-      const elements = document.querySelectorAll(selector);
-      for (const element of elements) {
-        const symbol = element.textContent?.trim();
-        if (symbol && symbol.length > 1) return symbol;
+      if (tradeIndicators.some(indicator => 
+          className.toLowerCase().includes(indicator) || 
+          textContent.toLowerCase().includes(indicator)
+      )) {
+        console.log('Trade-related element detected:', element);
+        setTimeout(() => this.analyzeTradeElement(element), 1000);
       }
     }
-    
-    // For Tradovate, try to extract from URL or page content
-    if (this.platform === 'Tradovate') {
-      // Look in the URL
-      const urlMatch = window.location.href.match(/contract[=/]([^&/?]+)/i);
-      if (urlMatch) return urlMatch[1];
-      
-      // Look for futures symbols (e.g., ESU3, NQU3)
-      const pageText = document.body.textContent || '';
-      const futuresMatch = pageText.match(/\b[A-Z]{1,3}[FGHJKMNQUVXZ]\d{1,2}\b/);
-      if (futuresMatch) return futuresMatch[0];
-    }
-    
-    // Try to extract from URL or page title
-    const urlMatch = window.location.href.match(/[A-Z]{6}|[A-Z]{3}[A-Z]{3}/);
-    if (urlMatch) return urlMatch[0];
-    
-    return 'UNKNOWN';
-  }
 
-  getCurrentPrice() {
-    // Platform-specific price selectors with Tradovate support
-    const priceSelectors = [
-      '.price', '.rate', '.quote', '.bid', '.ask',
-      '[class*="price"]', '[class*="rate"]', '[class*="quote"]',
-      '.last-price', '.current-price', '.market-price',
-      '.last', '.mark', '.settlement' // Tradovate specific
-    ];
-    
-    for (const selector of priceSelectors) {
-      const elements = document.querySelectorAll(selector);
-      for (const element of elements) {
-        const priceText = element.textContent?.replace(/[^0-9.-]/g, '');
-        const price = parseFloat(priceText);
-        if (!isNaN(price) && price > 0) return price;
+    async detectTradeFromClick(button) {
+      console.log('Analyzing trade from button click:', button);
+      
+      const buttonText = button.textContent || button.innerText || '';
+      const direction = this.determineDirection(buttonText, button);
+      
+      // Try to find instrument and price information
+      const instrument = this.extractInstrument();
+      const price = this.extractPrice();
+      
+      if (instrument && price) {
+        const tradeData = {
+          id: `${this.platform.toLowerCase()}-${Date.now()}`,
+          platform: this.platform,
+          instrument: instrument,
+          direction: direction,
+          entry_price: price,
+          exit_price: price,
+          trade_date: new Date().toISOString().split('T')[0],
+          trade_time: new Date().toTimeString().split(' ')[0],
+          trigger: 'button_click',
+          notes: `Button clicked: ${buttonText}`,
+          url: window.location.href
+        };
+        
+        await this.sendTradeData(tradeData);
       }
     }
-    
-    return 0;
-  }
 
-  getTradeDirection() {
-    // Look for recent buy/sell indicators
-    const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]'));
-    const recentButtons = buttons.slice(-20); // Check last 20 interactive elements
-    
-    for (const button of recentButtons) {
-      const text = button.textContent?.toLowerCase() || '';
-      const value = button.value?.toLowerCase() || '';
-      const className = button.className?.toLowerCase() || '';
+    determineDirection(text, element) {
+      const buyKeywords = ['buy', 'long', 'call', 'up', 'bull'];
+      const sellKeywords = ['sell', 'short', 'put', 'down', 'bear'];
       
-      if (text.includes('buy') || value.includes('buy') || className.includes('buy')) {
+      const lowerText = text.toLowerCase();
+      const className = (element.className || '').toLowerCase();
+      
+      if (buyKeywords.some(keyword => lowerText.includes(keyword) || className.includes(keyword))) {
         return 'BUY';
-      }
-      if (text.includes('sell') || value.includes('sell') || className.includes('sell')) {
+      } else if (sellKeywords.some(keyword => lowerText.includes(keyword) || className.includes(keyword))) {
         return 'SELL';
       }
+      
+      return 'UNKNOWN';
     }
-    
-    return 'UNKNOWN';
-  }
 
-  showRecordingStatus() {
-    const existing = document.getElementById('replay-locker-status');
-    if (existing) existing.remove();
+    extractInstrument() {
+      // Platform-specific instrument extraction
+      const selectors = [
+        '[class*="symbol"]',
+        '[class*="instrument"]',
+        '[data-testid*="symbol"]',
+        '[class*="ticker"]',
+        '.symbol',
+        '.instrument',
+        '.ticker'
+      ];
+      
+      for (const selector of selectors) {
+        const element = document.querySelector(selector);
+        if (element && element.textContent.trim()) {
+          const text = element.textContent.trim();
+          // Clean up common prefixes/suffixes
+          return text.replace(/^(Symbol:|Instrument:)/i, '').trim();
+        }
+      }
+      
+      // Fallback: try to extract from URL or page title
+      const urlMatch = window.location.href.match(/[A-Z]{3,6}\/[A-Z]{3,6}|[A-Z]{6,}/);
+      if (urlMatch) {
+        return urlMatch[0];
+      }
+      
+      return 'UNKNOWN';
+    }
 
-    if (!this.isRecording) return;
+    extractPrice() {
+      // Look for price elements
+      const priceSelectors = [
+        '[class*="price"]',
+        '[class*="quote"]',
+        '[class*="rate"]',
+        '[data-testid*="price"]',
+        '.price',
+        '.quote',
+        '.rate'
+      ];
+      
+      for (const selector of priceSelectors) {
+        const elements = document.querySelectorAll(selector);
+        for (const element of elements) {
+          const text = element.textContent.trim();
+          const priceMatch = text.match(/[\d,]+\.?\d*/);
+          if (priceMatch) {
+            return parseFloat(priceMatch[0].replace(/,/g, ''));
+          }
+        }
+      }
+      
+      return 0;
+    }
 
-    const indicator = document.createElement('div');
-    indicator.id = 'replay-locker-status';
-    indicator.innerHTML = `
-      <div style="
+    monitorPositions() {
+      // Watch for position table changes
+      const positionObserver = new MutationObserver(() => {
+        if (this.isRecording) {
+          setTimeout(() => this.checkPositionChanges(), 1000);
+        }
+      });
+
+      // Try to find position tables
+      const positionSelectors = [
+        '[class*="position"]',
+        '[class*="portfolio"]',
+        '[class*="account"]',
+        'table'
+      ];
+
+      positionSelectors.forEach(selector => {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(element => {
+          positionObserver.observe(element, {
+            childList: true,
+            subtree: true
+          });
+        });
+      });
+
+      this.observers.push(positionObserver);
+    }
+
+    checkPositionChanges() {
+      // This would analyze position tables for new trades
+      // Implementation depends on specific platform structure
+      console.log('Checking position changes...');
+    }
+
+    analyzeTradeElement(element) {
+      console.log('Analyzing trade element:', element);
+      // Extract trade data from the element
+      // This would be customized per platform
+    }
+
+    async captureManualTrade() {
+      const instrument = this.extractInstrument();
+      const price = this.extractPrice();
+      
+      const tradeData = {
+        id: `manual-${this.platform.toLowerCase()}-${Date.now()}`,
+        platform: this.platform,
+        instrument: instrument,
+        direction: 'MANUAL',
+        entry_price: price,
+        exit_price: price,
+        trade_date: new Date().toISOString().split('T')[0],
+        trade_time: new Date().toTimeString().split(' ')[0],
+        trigger: 'manual_capture',
+        notes: 'Manually captured trade',
+        url: window.location.href
+      };
+      
+      await this.sendTradeData(tradeData);
+    }
+
+    async sendTradeData(tradeData) {
+      try {
+        console.log('📈 Sending trade data:', tradeData);
+        await this.sendMessage({
+          type: 'TRADE_DETECTED',
+          data: tradeData
+        });
+        
+        this.showTradeCapture(tradeData);
+      } catch (error) {
+        console.error('Failed to send trade data:', error);
+      }
+    }
+
+    showTradeCapture(trade) {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
         position: fixed;
-        top: 20px;
-        right: 20px;
-        background: #1f2937;
-        color: white;
-        padding: 12px 16px;
-        border-radius: 8px;
-        border-left: 4px solid #10b981;
-        font-size: 14px;
-        z-index: 10000;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      ">
-        🔴 Recording Trades
-        <div style="font-size: 12px; opacity: 0.8; margin-top: 4px;">
-          ${this.platform} • Auto-detection active
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(indicator);
-  }
-
-  showCaptureNotification(symbol, direction) {
-    const notification = document.createElement('div');
-    notification.innerHTML = `
-      <div style="
-        position: fixed;
-        top: 80px;
-        right: 20px;
+        top: 50px;
+        right: 10px;
+        z-index: 10001;
         background: #10b981;
         color: white;
         padding: 12px 16px;
         border-radius: 8px;
         font-size: 14px;
-        z-index: 10000;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      ">
-        📊 Trade Captured!
-        <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">
-          ${symbol} - ${direction} (${this.platform})
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-      notification.remove();
-    }, 4000);
-  }
-}
+        font-weight: 600;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+      `;
+      notification.innerHTML = `
+        📈 Trade Captured!<br>
+        <small>${trade.instrument} - ${trade.direction}</small>
+      `;
+      
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+      }, 100);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => notification.remove(), 300);
+      }, 3000);
+    }
 
-// Initialize
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => new BrokerPlatformCapture());
-} else {
-  new BrokerPlatformCapture();
-}
+    async toggleRecording() {
+      this.isRecording = !this.isRecording;
+      
+      try {
+        await this.sendMessage({
+          type: 'TOGGLE_RECORDING',
+          isRecording: this.isRecording
+        });
+        
+        this.updateUI();
+      } catch (error) {
+        console.error('Failed to toggle recording:', error);
+      }
+    }
+
+    updateUI() {
+      const indicator = document.getElementById('replay-locker-indicator');
+      if (indicator) {
+        indicator.style.background = this.isRecording ? '#10b981' : '#6b7280';
+        indicator.innerHTML = `
+          <span style="display: inline-block; width: 8px; height: 8px; background: white; border-radius: 50%; margin-right: 6px;"></span>
+          ${this.isRecording ? 'Recording' : 'Paused'} | ${this.platform}
+        `;
+      }
+    }
+
+    setupKeyboardShortcuts() {
+      document.addEventListener('keydown', (event) => {
+        if (event.ctrlKey && event.shiftKey && event.key === 'R') {
+          event.preventDefault();
+          this.toggleRecording();
+        }
+        
+        if (event.ctrlKey && event.shiftKey && event.key === 'T') {
+          event.preventDefault();
+          this.captureManualTrade();
+        }
+      });
+    }
+
+    setupMessageListener() {
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === 'TOGGLE_RECORDING') {
+          this.isRecording = message.isRecording;
+          this.updateUI();
+          sendResponse({ success: true });
+        }
+        return true;
+      });
+    }
+
+    cleanup() {
+      this.observers.forEach(observer => observer.disconnect());
+      this.observers = [];
+    }
+  }
+
+  // Initialize the capture system
+  let captureSystem;
+  
+  function initCapture() {
+    try {
+      captureSystem = new TradingPlatformCapture();
+    } catch (error) {
+      console.error('Failed to initialize capture system:', error);
+      // Retry after delay
+      setTimeout(initCapture, 2000);
+    }
+  }
+
+  // Wait for page load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initCapture);
+  } else {
+    // DOM already loaded
+    setTimeout(initCapture, 1000);
+  }
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    if (captureSystem) {
+      captureSystem.cleanup();
+    }
+  });
+
+})();
