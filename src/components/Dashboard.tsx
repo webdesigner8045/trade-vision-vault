@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,7 +16,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewReplay }) => {
 
   if (loading) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="min-h-screen flex items-center justify-center px-4">
         <div className="text-center text-gray-400">Loading your trades...</div>
       </div>
     );
@@ -70,177 +69,185 @@ const Dashboard: React.FC<DashboardProps> = ({ onNewReplay }) => {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Trade Replays</h1>
-          <p className="text-gray-400">Review and analyze your trading performance</p>
+    <div className="min-h-screen overflow-x-hidden">
+      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center space-y-4 sm:space-y-0">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white">Trade Replays</h1>
+            <p className="text-gray-400 text-sm sm:text-base">Review and analyze your trading performance</p>
+          </div>
+          <Button 
+            className="bg-green-600 hover:bg-green-700 transition-colors w-full sm:w-auto" 
+            onClick={onNewReplay}
+          >
+            <FileText className="w-4 h-4 mr-2" />
+            New Replay
+          </Button>
         </div>
-        <Button className="bg-green-600 hover:bg-green-700" onClick={onNewReplay}>
-          <FileText className="w-4 h-4 mr-2" />
-          New Replay
-        </Button>
-      </div>
 
-      {/* Analytics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {/* Analytics Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <Card className="bg-gray-800/50 border-gray-700 hover:bg-gray-800/70 transition-colors">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs sm:text-sm font-medium text-gray-400">Total Trades</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl sm:text-2xl font-bold text-white">{totalTrades}</div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gray-800/50 border-gray-700 hover:bg-gray-800/70 transition-colors">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs sm:text-sm font-medium text-gray-400">Win Rate</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl sm:text-2xl font-bold text-green-400">{winRate}%</div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gray-800/50 border-gray-700 hover:bg-gray-800/70 transition-colors">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs sm:text-sm font-medium text-gray-400">Total P&L</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className={`text-xl sm:text-2xl font-bold ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {totalPnL >= 0 ? '+' : ''}{totalPnL.toFixed(0)} pips
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gray-800/50 border-gray-700 hover:bg-gray-800/70 transition-colors">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-xs sm:text-sm font-medium text-gray-400">With Recordings</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-xl sm:text-2xl font-bold text-blue-400">
+                {tradesWithRecordings}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Recent Trades */}
         <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-400">Total Trades</CardTitle>
+          <CardHeader>
+            <CardTitle className="text-white">Recent Replays</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-white">{totalTrades}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-400">Win Rate</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-400">{winRate}%</div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-400">Total P&L</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {totalPnL >= 0 ? '+' : ''}{totalPnL.toFixed(0)} pips
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-400">With Recordings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-400">
-              {tradesWithRecordings}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Trades */}
-      <Card className="bg-gray-800/50 border-gray-700">
-        <CardHeader>
-          <CardTitle className="text-white">Recent Replays</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {trades.length === 0 ? (
-            <div className="text-center py-8">
-              <FileText className="w-12 h-12 text-gray-500 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-300 mb-2">No trades yet</h3>
-              <p className="text-gray-500 mb-4">Start recording your trades to build your replay library</p>
-              <Button className="bg-green-600 hover:bg-green-700" onClick={onNewReplay}>
-                <FileText className="w-4 h-4 mr-2" />
-                Create Your First Replay
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {trades.slice(0, 5).map((trade) => (
-                <div key={trade.id} className="flex items-center justify-between p-4 bg-gray-900/50 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors cursor-pointer">
-                  <div className="flex items-center space-x-4">
-                    <div className="flex items-center space-x-2">
-                      <Calendar className="w-4 h-4 text-gray-400" />
-                      <span className="text-sm text-gray-400">{trade.trade_date}</span>
-                      {trade.trade_time && (
-                        <>
-                          <span className="text-gray-600">•</span>
-                          <span className="text-sm text-gray-400">{trade.trade_time}</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="font-medium text-white">{trade.instrument}</div>
-                    <Badge className={getTagColor(trade.tag)} variant="outline">
-                      <Tag className="w-3 h-3 mr-1" />
-                      {trade.tag}
-                    </Badge>
-                    {trade.recording_url && (
-                      <Badge 
-                        className="bg-blue-500/20 text-blue-400 border-blue-500/30 cursor-pointer hover:bg-blue-500/30 transition-colors" 
-                        variant="outline"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRecordingClick(trade.recording_url!);
-                        }}
-                      >
-                        {isVideoFile(trade.recording_url) ? (
+            {trades.length === 0 ? (
+              <div className="text-center py-8">
+                <FileText className="w-12 h-12 text-gray-500 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-300 mb-2">No trades yet</h3>
+                <p className="text-gray-500 mb-4 text-sm sm:text-base">Start recording your trades to build your replay library</p>
+                <Button className="bg-green-600 hover:bg-green-700 transition-colors" onClick={onNewReplay}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  Create Your First Replay
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {trades.slice(0, 5).map((trade) => (
+                  <div key={trade.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-gray-900/50 rounded-lg border border-gray-700 hover:border-gray-600 transition-all duration-200 space-y-3 sm:space-y-0">
+                    <div className="flex flex-col sm:flex-row sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
+                      <div className="flex items-center space-x-2 text-xs sm:text-sm">
+                        <Calendar className="w-4 h-4 text-gray-400" />
+                        <span className="text-gray-400">{trade.trade_date}</span>
+                        {trade.trade_time && (
                           <>
-                            <Video className="w-3 h-3 mr-1" />
-                            Video
-                          </>
-                        ) : isImageFile(trade.recording_url) ? (
-                          <>
-                            <Image className="w-3 h-3 mr-1" />
-                            Image
-                          </>
-                        ) : (
-                          <>
-                            <Play className="w-3 h-3 mr-1" />
-                            Recording
+                            <span className="text-gray-600">•</span>
+                            <span className="text-gray-400">{trade.trade_time}</span>
                           </>
                         )}
-                      </Badge>
-                    )}
-                  </div>
-                  
-                  <div className="flex items-center space-x-4">
-                    <div className="text-right">
-                      <div className="text-sm text-gray-400">
-                        {trade.entry_price} → {trade.exit_price}
                       </div>
-                      <div className={`text-sm font-medium ${parseFloat(getPnL(trade)) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {parseFloat(getPnL(trade)) >= 0 ? '+' : ''}{getPnL(trade)} {trade.instrument === 'BTCUSD' ? '$' : 'pips'}
+                      
+                      <div className="flex items-center space-x-2 flex-wrap gap-2">
+                        <div className="font-medium text-white text-sm sm:text-base">{trade.instrument}</div>
+                        <Badge className={getTagColor(trade.tag)} variant="outline">
+                          <Tag className="w-3 h-3 mr-1" />
+                          {trade.tag}
+                        </Badge>
+                        {trade.recording_url && (
+                          <Badge 
+                            className="bg-blue-500/20 text-blue-400 border-blue-500/30 cursor-pointer hover:bg-blue-500/30 transition-colors" 
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRecordingClick(trade.recording_url!);
+                            }}
+                          >
+                            {isVideoFile(trade.recording_url) ? (
+                              <>
+                                <Video className="w-3 h-3 mr-1" />
+                                Video
+                              </>
+                            ) : isImageFile(trade.recording_url) ? (
+                              <>
+                                <Image className="w-3 h-3 mr-1" />
+                                Image
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-3 h-3 mr-1" />
+                                Recording
+                              </>
+                            )}
+                          </Badge>
+                        )}
                       </div>
                     </div>
-                    {parseFloat(getPnL(trade)) >= 0 ? (
-                      <TrendingUp className="w-5 h-5 text-green-400" />
-                    ) : (
-                      <TrendingDown className="w-5 h-5 text-red-400" />
-                    )}
+                    
+                    <div className="flex items-center justify-between sm:justify-end space-x-4">
+                      <div className="text-left sm:text-right">
+                        <div className="text-xs sm:text-sm text-gray-400">
+                          {trade.entry_price} → {trade.exit_price}
+                        </div>
+                        <div className={`text-sm sm:text-base font-medium ${parseFloat(getPnL(trade)) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {parseFloat(getPnL(trade)) >= 0 ? '+' : ''}{getPnL(trade)} {trade.instrument === 'BTCUSD' ? '$' : 'pips'}
+                        </div>
+                      </div>
+                      {parseFloat(getPnL(trade)) >= 0 ? (
+                        <TrendingUp className="w-5 h-5 text-green-400 flex-shrink-0" />
+                      ) : (
+                        <TrendingDown className="w-5 h-5 text-red-400 flex-shrink-0" />
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-      {/* Recording Modal */}
-      <Dialog open={!!selectedRecording} onOpenChange={() => setSelectedRecording(null)}>
-        <DialogContent className="bg-gray-800 border-gray-700 max-w-4xl max-h-[90vh] overflow-hidden">
-          <DialogHeader>
-            <DialogTitle className="text-white">
-              {selectedRecording?.type === 'video' ? 'Video Recording' : 'Chart Screenshot'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex justify-center items-center p-4">
-            {selectedRecording?.type === 'video' ? (
-              <video 
-                controls 
-                className="w-full max-w-full rounded-lg"
-                autoPlay
-              >
-                <source src={selectedRecording.url} />
-                Your browser does not support the video tag.
-              </video>
-            ) : selectedRecording?.type === 'image' ? (
-              <img 
-                src={selectedRecording.url} 
-                alt="Trade chart or screenshot"
-                className="w-full max-w-full rounded-lg object-contain"
-              />
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
+        {/* Recording Modal */}
+        <Dialog open={!!selectedRecording} onOpenChange={() => setSelectedRecording(null)}>
+          <DialogContent className="bg-gray-800 border-gray-700 max-w-4xl max-h-[90vh] overflow-hidden w-[95vw] sm:w-full">
+            <DialogHeader>
+              <DialogTitle className="text-white">
+                {selectedRecording?.type === 'video' ? 'Video Recording' : 'Chart Screenshot'}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex justify-center items-center p-2 sm:p-4">
+              {selectedRecording?.type === 'video' ? (
+                <video 
+                  controls 
+                  className="w-full max-w-full rounded-lg"
+                  autoPlay
+                >
+                  <source src={selectedRecording.url} />
+                  Your browser does not support the video tag.
+                </video>
+              ) : selectedRecording?.type === 'image' ? (
+                <img 
+                  src={selectedRecording.url} 
+                  alt="Trade chart or screenshot"
+                  className="w-full max-w-full rounded-lg object-contain"
+                />
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   );
 };

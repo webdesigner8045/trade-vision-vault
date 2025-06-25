@@ -37,16 +37,16 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 overflow-x-hidden">
       <Header onNewReplay={() => setCurrentView('form')} />
       
       {/* Navigation */}
-      <div className="border-b border-gray-700 bg-gray-900/50">
-        <div className="px-6 py-3">
-          <nav className="flex space-x-6">
+      <div className="border-b border-gray-700 bg-gray-900/50 sticky top-16 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3">
+          <nav className="flex space-x-1 sm:space-x-6 overflow-x-auto scrollbar-hide">
             <button
               onClick={() => setCurrentView('dashboard')}
-              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                 currentView === 'dashboard'
                   ? 'bg-green-600 text-white'
                   : 'text-gray-300 hover:text-white hover:bg-gray-800'
@@ -56,7 +56,7 @@ const Index = () => {
             </button>
             <button
               onClick={() => setCurrentView('timeline')}
-              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                 currentView === 'timeline'
                   ? 'bg-green-600 text-white'
                   : 'text-gray-300 hover:text-white hover:bg-gray-800'
@@ -66,7 +66,7 @@ const Index = () => {
             </button>
             <button
               onClick={() => setCurrentView('form')}
-              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+              className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                 currentView === 'form'
                   ? 'bg-green-600 text-white'
                   : 'text-gray-300 hover:text-white hover:bg-gray-800'
