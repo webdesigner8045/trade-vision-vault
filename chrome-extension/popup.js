@@ -1,247 +1,114 @@
 
-// Popup React-like implementation without build tools
-class PopupApp {
+// Simple popup functionality
+class PopupController {
   constructor() {
-    this.state = {
-      user: null,
-      trades: [],
-      isLoading: true,
-      isSyncing: false,
-      lastSync: null
-    };
-    
+    this.isRecording = false;
+    this.trades = [];
     this.init();
   }
 
   async init() {
-    await this.loadInitialData();
-    this.render();
+    await this.loadData();
     this.setupEventListeners();
-    
-    // Auto-refresh every 30 seconds
-    setInterval(() => this.refreshData(), 30000);
+    this.updateUI();
   }
 
-  async loadInitialData() {
+  async loadData() {
     try {
-      // Load auth state
-      const authData = await chrome.storage.local.get('supabase_session');
-      if (authData.supabase_session) {
-        this.state.user = authData.supabase_session.user;
-      }
-
-      // Load trades
-      const tradesData = await chrome.storage.local.get('trades');
-      this.state.trades = tradesData.trades || [];
-
-      // Load last sync time
-      const syncData = await chrome.storage.local.get('last_sync');
-      this.state.lastSync = syncData.last_sync;
-
-      this.state.isLoading = false;
+      const result = await chrome.storage.local.get(['trades', 'isRecording']);
+      this.trades = result.trades || [];
+      this.isRecording = result.isRecording || false;
     } catch (error) {
-      console.error('Failed to load initial data:', error);
-      this.state.isLoading = false;
+      console.error('Failed to load data:', error);
     }
-  }
-
-  async refreshData() {
-    const tradesData = await chrome.storage.local.get('trades');
-    this.state.trades = tradesData.trades || [];
-    this.render();
-  }
-
-  render() {
-    const container = document.getElementById('popup-root');
-    container.innerHTML = this.getHTML();
-  }
-
-  getHTML() {
-    if (this.state.isLoading) {
-      return this.getLoadingHTML();
-    }
-
-    return `
-      <div class="popup-container">
-        ${this.getHeaderHTML()}
-        ${this.getAuthSectionHTML()}
-        ${this.getTradesSectionHTML()}
-        ${this.getActionsSectionHTML()}
-      </div>
-    `;
-  }
-
-  getLoadingHTML() {
-    return `
-      <div class="popup-container">
-        <div style="display: flex; justify-content: center; align-items: center; height: 200px;">
-          <div class="spinner"></div>
-        </div>
-      </div>
-    `;
-  }
-
-  getHeaderHTML() {
-    return `
-      <div class="header">
-        <div class="logo">
-          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 0C3.58 0 0 3.58 0 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm3.5 6L8 10.5 4.5 6h7z" fill="white"/>
-          </svg>
-        </div>
-        <h1>Replay Locker</h1>
-      </div>
-    `;
-  }
-
-  getAuthSectionHTML() {
-    const isAuthenticated = !!this.state.user;
-    
-    return `
-      <div class="auth-section">
-        <div class="auth-status">
-          <div class="user-info">
-            <div class="status-dot ${isAuthenticated ? '' : 'offline'}"></div>
-            <span>${isAuthenticated ? this.state.user.email : 'Not signed in'}</span>
-          </div>
-          ${isAuthenticated 
-            ? '<button class="btn btn-secondary btn-small" onclick="popup.signOut()">Sign Out</button>'
-            : '<button class="btn btn-primary btn-small" onclick="popup.openWebApp()">Sign In</button>'
-          }
-        </div>
-      </div>
-    `;
-  }
-
-  getTradesSectionHTML() {
-    const recentTrades = this.state.trades.slice(0, 5);
-    
-    return `
-      <div class="trades-section">
-        <h2 class="section-title">Recent Trades (${this.state.trades.length})</h2>
-        <div class="trades-list scrollbar-hide">
-          ${recentTrades.length > 0 
-            ? recentTrades.map(trade => this.getTradeItemHTML(trade)).join('')
-            : this.getEmptyStateHTML()
-          }
-        </div>
-      </div>
-    `;
-  }
-
-  getTradeItemHTML(trade) {
-    const date = new Date(trade.timestamp);
-    const timeString = date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-    
-    return `
-      <div class="trade-item ${trade.synced ? 'synced' : 'pending'}">
-        <div class="trade-header">
-          <span class="trade-symbol">${trade.instrument}</span>
-          <span class="trade-time">${timeString}</span>
-        </div>
-        <div class="trade-details">
-          Price: $${trade.entry_price ? trade.entry_price.toFixed(2) : 'N/A'}
-        </div>
-        <div class="trade-platform">${trade.platform}</div>
-      </div>
-    `;
-  }
-
-  getEmptyStateHTML() {
-    return `
-      <div class="empty-state">
-        <svg viewBox="0 0 24 24" fill="currentColor">
-          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
-        </svg>
-        <p>No trades captured yet</p>
-        <p style="margin-top: 8px; font-size: 12px;">Visit a trading platform and click "Record Trade"</p>
-      </div>
-    `;
-  }
-
-  getActionsSectionHTML() {
-    const pendingCount = this.state.trades.filter(t => !t.synced).length;
-    
-    return `
-      <div class="actions-section">
-        ${this.state.user ? `
-          <div class="sync-status">
-            ${this.state.isSyncing 
-              ? '<div class="spinner"></div><span>Syncing...</span>'
-              : `<span>${pendingCount} trades pending sync</span>`
-            }
-          </div>
-        ` : ''}
-        
-        <div class="action-buttons">
-          <button class="btn btn-secondary" onclick="popup.openWebApp()">
-            Open App
-          </button>
-          ${this.state.user && pendingCount > 0 
-            ? '<button class="btn btn-primary" onclick="popup.syncTrades()">Sync Now</button>'
-            : ''
-          }
-        </div>
-      </div>
-    `;
   }
 
   setupEventListeners() {
-    // Make popup instance globally available for button clicks
-    window.popup = this;
+    document.getElementById('recordBtn').addEventListener('click', () => {
+      this.toggleRecording();
+    });
+
+    document.getElementById('openAppBtn').addEventListener('click', () => {
+      this.openWebApp();
+    });
   }
 
-  async signOut() {
-    await chrome.storage.local.remove('supabase_session');
-    this.state.user = null;
-    this.render();
+  async toggleRecording() {
+    this.isRecording = !this.isRecording;
+    
+    // Save state
+    await chrome.storage.local.set({ isRecording: this.isRecording });
+    
+    // Notify content scripts
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab) {
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'TOGGLE_RECORDING',
+          isRecording: this.isRecording
+        });
+      }
+    } catch (error) {
+      console.log('No content script to notify');
+    }
+    
+    this.updateUI();
   }
 
   async openWebApp() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     await chrome.tabs.create({ 
-      url: 'https://your-replay-locker-domain.vercel.app',
-      index: tabs[0].index + 1
+      url: 'https://trade-vision-vault.vercel.app'
     });
     window.close();
   }
 
-  async syncTrades() {
-    if (!this.state.user) return;
-    
-    this.state.isSyncing = true;
-    this.render();
+  updateUI() {
+    const recordBtn = document.getElementById('recordBtn');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const tradeCount = document.getElementById('tradeCount');
 
-    try {
-      const pendingTrades = this.state.trades.filter(t => !t.synced);
-      
-      for (const trade of pendingTrades) {
-        await chrome.runtime.sendMessage({
-          type: 'SYNC_TO_SUPABASE',
-          data: trade
-        });
-      }
-
-      // Mark all as synced locally
-      this.state.trades = this.state.trades.map(t => ({ ...t, synced: true }));
-      await chrome.storage.local.set({ trades: this.state.trades });
-      
-      this.state.lastSync = new Date().toISOString();
-      await chrome.storage.local.set({ last_sync: this.state.lastSync });
-      
-    } catch (error) {
-      console.error('Sync failed:', error);
-    } finally {
-      this.state.isSyncing = false;
-      this.render();
+    if (this.isRecording) {
+      recordBtn.textContent = 'Stop Recording';
+      recordBtn.style.background = '#dc2626';
+      statusDot.classList.add('active');
+      statusText.textContent = 'Recording Active';
+    } else {
+      recordBtn.textContent = 'Record Trade';
+      recordBtn.style.background = '#10b981';
+      statusDot.classList.remove('active');
+      statusText.textContent = 'Not Recording';
     }
+
+    tradeCount.textContent = this.trades.length;
+    this.renderTrades();
+  }
+
+  renderTrades() {
+    const tradesList = document.getElementById('tradesList');
+    
+    if (this.trades.length === 0) {
+      tradesList.innerHTML = `
+        <div style="text-align: center; color: #6b7280; padding: 20px;">
+          No trades captured yet
+        </div>
+      `;
+      return;
+    }
+
+    tradesList.innerHTML = this.trades.slice(0, 5).map(trade => `
+      <div class="trade-item">
+        <div class="trade-symbol">${trade.instrument || 'Unknown'}</div>
+        <div>Price: $${trade.entry_price || 'N/A'}</div>
+        <div style="font-size: 11px; color: #9ca3af;">
+          ${new Date(trade.timestamp).toLocaleTimeString()}
+        </div>
+      </div>
+    `).join('');
   }
 }
 
 // Initialize popup when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  new PopupApp();
+  new PopupController();
 });

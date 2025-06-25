@@ -1,245 +1,143 @@
 
-// Content script for MT4/MT5 web terminals
+// Content script for MT4/MT5 platforms
 class MT4Capture {
   constructor() {
-    this.isActive = false;
-    this.tradeButton = null;
+    this.isRecording = false;
     this.init();
   }
 
-  init() {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => this.setup());
-    } else {
-      this.setup();
-    }
-  }
-
-  setup() {
-    this.injectRecordButton();
-    this.setupTradeDetection();
-  }
-
-  injectRecordButton() {
-    const checkForToolbar = () => {
-      const toolbar = document.querySelector('.toolbar') || 
-                     document.querySelector('.mt4-toolbar') ||
-                     document.querySelector('.mt5-toolbar') ||
-                     document.querySelector('header');
-      
-      if (toolbar && !document.getElementById('replay-locker-btn')) {
-        this.createRecordButton(toolbar);
-      } else {
-        setTimeout(checkForToolbar, 1000);
+  async init() {
+    // Get recording status
+    const status = await chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATUS' });
+    this.isRecording = status.isRecording || false;
+    
+    // Listen for recording toggle
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === 'TOGGLE_RECORDING') {
+        this.isRecording = message.isRecording;
+        this.showRecordingStatus();
       }
-    };
+    });
 
-    checkForToolbar();
-  }
-
-  createRecordButton(container) {
-    const button = document.createElement('button');
-    button.id = 'replay-locker-btn';
-    button.innerHTML = `
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-        <circle cx="8" cy="8" r="6" fill="#059669"/>
-        <circle cx="8" cy="8" r="2" fill="white"/>
-      </svg>
-      Record
-    `;
-    button.className = 'replay-locker-record-btn';
-    button.addEventListener('click', () => this.toggleRecording());
-    
-    container.appendChild(button);
-    this.tradeButton = button;
-  }
-
-  toggleRecording() {
-    this.isActive = !this.isActive;
-    
-    if (this.isActive) {
-      this.tradeButton.classList.add('active');
-      this.tradeButton.innerHTML = `
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <rect x="6" y="6" width="4" height="4" fill="#dc2626"/>
-        </svg>
-        Stop
-      `;
-      this.startListening();
-    } else {
-      this.tradeButton.classList.remove('active');
-      this.tradeButton.innerHTML = `
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <circle cx="8" cy="8" r="6" fill="#059669"/>
-          <circle cx="8" cy="8" r="2" fill="white"/>
-        </svg>
-        Record
-      `;
-      this.stopListening();
-    }
-  }
-
-  startListening() {
-    this.setupTradeObserver();
-  }
-
-  stopListening() {
-    if (this.tradeObserver) {
-      this.tradeObserver.disconnect();
-    }
+    this.setupTradeDetection();
+    this.showRecordingStatus();
   }
 
   setupTradeDetection() {
-    this.setupTradeObserver();
-  }
-
-  setupTradeObserver() {
-    const targetNodes = [
-      document.body,
-      document.querySelector('.trade-history'),
-      document.querySelector('.positions'),
-      document.querySelector('.orders')
-    ].filter(Boolean);
-
-    this.tradeObserver = new MutationObserver((mutations) => {
-      if (!this.isActive) return;
-
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            this.checkForTradeExecution(node);
-          }
-        });
-      });
-    });
-
-    targetNodes.forEach(node => {
-      this.tradeObserver.observe(node, {
-        childList: true,
-        subtree: true
-      });
-    });
-  }
-
-  checkForTradeExecution(element) {
-    const tradeIndicators = [
-      'order executed',
-      'position opened',
-      'buy',
-      'sell',
-      'trade confirmed'
-    ];
-
-    const text = element.textContent?.toLowerCase() || '';
-    const hasTradeIndicator = tradeIndicators.some(indicator => 
-      text.includes(indicator)
-    );
-
-    if (hasTradeIndicator) {
-      this.captureTradeData(element);
-    }
-  }
-
-  async captureTradeData(element) {
-    try {
-      const tradeData = await this.extractTradeData(element);
-      const screenshot = await this.requestScreenshot();
+    // Monitor for trade-related activities
+    document.addEventListener('click', (event) => {
+      if (!this.isRecording) return;
       
-      const fullTradeData = {
-        ...tradeData,
-        screenshot,
-        platform: 'MT4/MT5',
-        url: window.location.href
-      };
-
-      chrome.runtime.sendMessage({
-        type: 'TRADE_DETECTED',
-        data: fullTradeData
-      });
-
-      this.showCaptureNotification();
-    } catch (error) {
-      console.error('Trade capture failed:', error);
-    }
+      const target = event.target;
+      const text = target.textContent?.toLowerCase() || '';
+      
+      if (text.includes('buy') || text.includes('sell') || 
+          text.includes('execute') || text.includes('trade')) {
+        this.captureTradeData();
+      }
+    });
   }
 
-  async extractTradeData(element) {
+  async captureTradeData() {
     const symbol = this.getCurrentSymbol();
-    const time = new Date().toISOString();
+    const price = this.getCurrentPrice();
     
-    return {
+    const tradeData = {
       instrument: symbol,
+      entry_price: price,
+      platform: 'MT4/MT5',
       trade_date: new Date().toISOString().split('T')[0],
-      trade_time: new Date().toTimeString().split(' ')[0],
-      entry_price: this.getCurrentPrice(),
-      exit_price: null,
-      tag: 'learning',
-      notes: `Auto-captured from MT4/MT5 at ${time}`
+      trade_time: new Date().toTimeString().split(' ')[0]
     };
+
+    await chrome.runtime.sendMessage({
+      type: 'TRADE_DETECTED',
+      data: tradeData
+    });
+
+    this.showCaptureNotification();
   }
 
   getCurrentSymbol() {
-    const symbolSelectors = [
-      '.symbol',
-      '.instrument',
-      '.currency-pair',
-      '[data-symbol]'
-    ];
-
-    for (const selector of symbolSelectors) {
-      const element = document.querySelector(selector);
-      if (element) {
-        return element.textContent?.trim() || element.getAttribute('data-symbol');
-      }
-    }
-
-    return 'Unknown';
+    // Try to find symbol from MT4/MT5 UI
+    const symbolElement = document.querySelector('.symbol') ||
+                         document.querySelector('.instrument') ||
+                         document.querySelector('.currency-pair');
+    
+    return symbolElement?.textContent?.trim() || 'UNKNOWN';
   }
 
   getCurrentPrice() {
-    const priceSelectors = [
-      '.price',
-      '.bid',
-      '.ask',
-      '.last-price'
-    ];
-
-    for (const selector of priceSelectors) {
-      const element = document.querySelector(selector);
-      if (element) {
-        const price = parseFloat(element.textContent?.replace(/[^0-9.-]/g, ''));
-        if (!isNaN(price)) {
-          return price;
-        }
-      }
+    const priceElement = document.querySelector('.price') ||
+                        document.querySelector('.bid') ||
+                        document.querySelector('.ask');
+    
+    if (priceElement) {
+      const priceText = priceElement.textContent?.replace(/[^0-9.-]/g, '');
+      const price = parseFloat(priceText);
+      return isNaN(price) ? 0 : price;
     }
-
+    
     return 0;
   }
 
-  async requestScreenshot() {
-    try {
-      const response = await chrome.runtime.sendMessage({
-        type: 'CAPTURE_SCREENSHOT'
-      });
-      return response.screenshot;
-    } catch (error) {
-      console.error('Screenshot request failed:', error);
-      return null;
-    }
+  showRecordingStatus() {
+    const existing = document.getElementById('replay-locker-status');
+    if (existing) existing.remove();
+
+    if (!this.isRecording) return;
+
+    const indicator = document.createElement('div');
+    indicator.id = 'replay-locker-status';
+    indicator.innerHTML = `
+      <div style="
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #1f2937;
+        color: white;
+        padding: 10px 15px;
+        border-radius: 6px;
+        border-left: 4px solid #10b981;
+        font-size: 14px;
+        z-index: 10000;
+      ">
+        🔴 Recording Trades
+      </div>
+    `;
+    
+    document.body.appendChild(indicator);
   }
 
   showCaptureNotification() {
     const notification = document.createElement('div');
-    notification.className = 'replay-locker-notification';
-    notification.textContent = 'Trade captured! 📊';
+    notification.innerHTML = `
+      <div style="
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        background: #10b981;
+        color: white;
+        padding: 10px 15px;
+        border-radius: 6px;
+        font-size: 14px;
+        z-index: 10000;
+      ">
+        📊 Trade Captured!
+      </div>
+    `;
+    
     document.body.appendChild(notification);
-
+    
     setTimeout(() => {
       notification.remove();
     }, 3000);
   }
 }
 
-// Initialize MT4/MT5 capture
-new MT4Capture();
+// Initialize
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => new MT4Capture());
+} else {
+  new MT4Capture();
+}
