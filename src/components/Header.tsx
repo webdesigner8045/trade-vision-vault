@@ -1,164 +1,65 @@
-import React from 'react';Add commentMore actions
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Calendar, TrendingUp, TrendingDown, FileText, Tag } from 'lucide-react';
+import React, { useState } from 'react';
 
-const mockTrades = [
-  {
-    id: 1,
-    instrument: 'EURUSD',
-    date: '2024-06-23',
-    entryPrice: 1.0850,
-    exitPrice: 1.0920,
-    tag: 'win',
-    notes: 'Perfect setup with strong momentum',
-    hasRecording: true,
-  },
-  {
-    id: 2,
-    instrument: 'GBPJPY',
-    date: '2024-06-22',
-    entryPrice: 158.45,
-    exitPrice: 157.20,
-    tag: 'mistake',
-    notes: 'Entered too early without confirmation',
-    hasRecording: false,
-  },
-  {
-    id: 3,
-    instrument: 'SPY',
-    date: '2024-06-21',
-    entryPrice: 425.30,
-    exitPrice: 428.70,
-    tag: 'learning',
-    notes: 'Good entry but could have held longer',
-    hasRecording: true,
-  },
-];
-
-const Dashboard = () => {
-  const totalTrades = mockTrades.length;
-  const winRate = (mockTrades.filter(trade => trade.tag === 'win').length / totalTrades * 100).toFixed(1);
-  const totalPnL = mockTrades.reduce((acc, trade) => {
-    const pnl = trade.exitPrice - trade.entryPrice;
-    return acc + (trade.instrument.includes('JPY') ? pnl * 100 : pnl * 10000);
-  }, 0);
-
-  const getTagColor = (tag: string) => {
-    switch (tag) {
-      case 'win': return 'bg-green-500/20 text-green-400 border-green-500/30';
-      case 'mistake': return 'bg-red-500/20 text-red-400 border-red-500/30';
-      case 'learning': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
-      default: return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-    }
-  };
-
-  const getPnL = (trade: any) => {
-    const pnl = trade.exitPrice - trade.entryPrice;
-    return trade.instrument.includes('JPY') ? (pnl * 100).toFixed(0) : (pnl * 10000).toFixed(0);
-  };
+export default function Header() {
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-white">Trade Replays</h1>
-          <p className="text-gray-400">Review and analyze your trading performance</p>
+    <header className="w-full max-w-screen-xl mx-auto px-4 sm:px-6 lg:px-8 bg-white shadow-md fixed top-0 left-0 right-0 z-50">
+      <div className="flex items-center justify-between h-16">
+        {/* Logo or brand */}
+        <div className="flex-shrink-0">
+          <a href="/" className="text-xl font-bold text-gray-800">Trade Vision Vault</a>
         </div>
-        <Button className="bg-green-600 hover:bg-green-700">
-          <FileText className="w-4 h-4 mr-2" />
-          New Replay
-        </Button>
+
+        {/* Desktop nav */}
+        <nav className="hidden md:flex space-x-6">
+          <a href="/" className="text-gray-700 hover:text-gray-900">Home</a>
+          <a href="/upload" className="text-gray-700 hover:text-gray-900">Upload</a>
+          <a href="/replay" className="text-gray-700 hover:text-gray-900">Replay</a>
+          <a href="/dashboard" className="text-gray-700 hover:text-gray-900">Dashboard</a>
+        </nav>
+
+        {/* Mobile hamburger menu button */}
+        <div className="md:hidden">
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className="text-gray-700 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+            aria-label="Toggle menu"
+          >
+            {isOpen ? (
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* Analytics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-400">Total Trades</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-white">{totalTrades}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-400">Win Rate</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-400">{winRate}%</div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-400">Total P&L</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${totalPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {totalPnL >= 0 ? '+' : ''}{totalPnL.toFixed(0)} pips
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gray-800/50 border-gray-700">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-400">With Recordings</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-400">
-              {mockTrades.filter(t => t.hasRecording).length}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Trades */}
-      <Card className="bg-gray-800/50 border-gray-700">
-        <CardHeader>
-          <CardTitle className="text-white">Recent Replays</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {mockTrades.map((trade) => (
-              <div key={trade.id} className="flex items-center justify-between p-4 bg-gray-900/50 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors cursor-pointer">
-                <div className="flex items-center space-x-4">
-                  <div className="flex items-center space-x-2">
-                    <Calendar className="w-4 h-4 text-gray-400" />
-                    <span className="text-sm text-gray-400">{trade.date}</span>
-                  </div>
-                  <div className="font-medium text-white">{trade.instrument}</div>
-                  <Badge className={getTagColor(trade.tag)} variant="outline">
-                    <Tag className="w-3 h-3 mr-1" />
-                    {trade.tag}
-                  </Badge>
-                </div>
-                
-                <div className="flex items-center space-x-4">
-                  <div className="text-right">
-                    <div className="text-sm text-gray-400">
-                      {trade.entryPrice} → {trade.exitPrice}
-                    </div>
-                    <div className={`text-sm font-medium ${parseFloat(getPnL(trade)) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {parseFloat(getPnL(trade)) >= 0 ? '+' : ''}{getPnL(trade)} pips
-                    </div>
-                  </div>
-                  {parseFloat(getPnL(trade)) >= 0 ? (
-                    <TrendingUp className="w-5 h-5 text-green-400" />
-                  ) : (
-                    <TrendingDown className="w-5 h-5 text-red-400" />
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+      {/* Mobile menu */}
+      {isOpen && (
+        <nav className="md:hidden px-4 pb-4 space-y-2 bg-white shadow-lg">
+          <a href="/" className="block text-gray-700 hover:text-gray-900">Home</a>
+          <a href="/upload" className="block text-gray-700 hover:text-gray-900">Upload</a>
+          <a href="/replay" className="block text-gray-700 hover:text-gray-900">Replay</a>
+          <a href="/dashboard" className="block text-gray-700 hover:text-gray-900">Dashboard</a>
+        </nav>
+      )}
+    </header>
   );
-};
-
-export default Dashboard;
+}
