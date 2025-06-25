@@ -19,6 +19,9 @@
     "https://*.fxpro.com/*",
     "https://*.oanda.com/*",
     "https://*.ig.com/*",
+    "https://*.etoro.com/*",
+    "https://*.plus500.com/*",
+    "https://*.avatrade.com/*",
     "https://trade-vision-vault.vercel.app/*"
   ],
   "background": {

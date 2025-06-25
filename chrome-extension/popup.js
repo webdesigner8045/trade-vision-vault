@@ -1,10 +1,11 @@
 
-// Enhanced popup functionality with all icon interactions
+// Enhanced popup functionality with comprehensive trade management
 class PopupController {
   constructor() {
     this.isRecording = false;
     this.trades = [];
     this.user = null;
+    this.selectedTrade = null;
     this.init();
   }
 
@@ -61,26 +62,38 @@ class PopupController {
     document.getElementById('openAppBtn').addEventListener('click', () => {
       this.openWebApp();
     });
+
+    // Export data
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      this.exportTrades();
+    });
+
+    // Clear data
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      this.clearAllData();
+    });
+
+    // Manual trade entry
+    document.getElementById('manualTradeBtn').addEventListener('click', () => {
+      this.showManualTradeForm();
+    });
+
+    // Listen for background messages
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.type === 'TRADE_UPDATED') {
+        this.loadData().then(() => this.updateUI());
+      }
+    });
   }
 
   async toggleRecording() {
     this.isRecording = !this.isRecording;
     
-    // Save state
-    await chrome.storage.local.set({ isRecording: this.isRecording });
-    
-    // Notify content scripts
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab) {
-        chrome.tabs.sendMessage(tab.id, {
-          type: 'TOGGLE_RECORDING',
-          isRecording: this.isRecording
-        });
-      }
-    } catch (error) {
-      console.log('No content script to notify');
-    }
+    // Save state and notify background
+    await chrome.runtime.sendMessage({
+      type: 'TOGGLE_RECORDING',
+      isRecording: this.isRecording
+    });
     
     // Show notification
     if (this.isRecording) {
@@ -111,23 +124,15 @@ class PopupController {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab) {
-        // Capture visible tab
-        const dataUrl = await chrome.tabs.captureVisibleTab();
-        
-        // Store screenshot with timestamp
-        const screenshot = {
-          id: Date.now().toString(),
-          dataUrl,
-          timestamp: new Date().toISOString(),
-          url: tab.url,
-          title: tab.title
-        };
+        const screenshot = await chrome.runtime.sendMessage({
+          type: 'CAPTURE_SCREENSHOT'
+        });
 
-        const screenshots = await this.getStoredScreenshots();
-        screenshots.push(screenshot);
-        await chrome.storage.local.set({ screenshots });
-
-        this.showNotification('Screenshot captured', 'Screenshot saved successfully');
+        if (screenshot) {
+          this.showNotification('Screenshot captured', 'Screenshot saved successfully');
+        } else {
+          this.showNotification('Screenshot failed', 'Could not capture screenshot');
+        }
       }
     } catch (error) {
       console.error('Screenshot failed:', error);
@@ -148,14 +153,16 @@ class PopupController {
       syncBtn.innerHTML = '<div class="spinner"></div>';
       syncBtn.disabled = true;
 
-      // Simulate sync process (replace with actual API call)
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const result = await chrome.runtime.sendMessage({
+        type: 'SYNC_TRADES'
+      });
 
-      // Mark trades as synced
-      this.trades.forEach(trade => trade.synced = true);
-      await chrome.storage.local.set({ trades: this.trades });
-
-      this.showNotification('Sync complete', `${this.trades.length} trades synced`);
+      if (result.success) {
+        this.showNotification('Sync complete', result.message);
+        await this.loadData();
+      } else {
+        throw new Error(result.error || 'Sync failed');
+      }
       
       // Restore button
       syncBtn.innerHTML = originalHTML;
@@ -164,19 +171,142 @@ class PopupController {
       this.updateUI();
     } catch (error) {
       console.error('Sync failed:', error);
-      this.showNotification('Sync failed', 'Could not sync trades');
+      this.showNotification('Sync failed', error.message || 'Could not sync trades');
+      
+      // Restore button
+      const syncBtn = document.getElementById('syncBtn');
+      syncBtn.innerHTML = originalHTML;
+      syncBtn.disabled = false;
     }
   }
 
+  exportTrades() {
+    if (this.trades.length === 0) {
+      this.showNotification('No data', 'No trades to export');
+      return;
+    }
+
+    try {
+      const exportData = {
+        trades: this.trades,
+        exported_at: new Date().toISOString(),
+        total_trades: this.trades.length
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: 'application/json'
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `replay-locker-trades-${new Date().toISOString().split('T')[0]}.json`;
+      
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      this.showNotification('Export complete', `${this.trades.length} trades exported`);
+    } catch (error) {
+      console.error('Export failed:', error);
+      this.showNotification('Export failed', 'Could not export trades');
+    }
+  }
+
+  async clearAllData() {
+    if (confirm('Are you sure you want to clear all captured trades? This cannot be undone.')) {
+      try {
+        await chrome.storage.local.remove(['trades', 'screenshots']);
+        this.trades = [];
+        this.updateUI();
+        this.showNotification('Data cleared', 'All trade data has been removed');
+      } catch (error) {
+        console.error('Clear data failed:', error);
+        this.showNotification('Clear failed', 'Could not clear data');
+      }
+    }
+  }
+
+  showManualTradeForm() {
+    // Create manual trade entry modal
+    const modal = document.createElement('div');
+    modal.className = 'manual-trade-modal';
+    modal.innerHTML = `
+      <div class="modal-backdrop">
+        <div class="modal-content">
+          <h3>Add Manual Trade</h3>
+          <form id="manualTradeForm">
+            <div class="form-group">
+              <label>Symbol:</label>
+              <input type="text" id="manualSymbol" required placeholder="e.g., EURUSD">
+            </div>
+            <div class="form-group">
+              <label>Direction:</label>
+              <select id="manualDirection" required>
+                <option value="BUY">Buy/Long</option>
+                <option value="SELL">Sell/Short</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Entry Price:</label>
+              <input type="number" id="manualPrice" step="0.00001" required>
+            </div>
+            <div class="form-group">
+              <label>Notes:</label>
+              <textarea id="manualNotes" placeholder="Optional notes..."></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="button" id="cancelManual">Cancel</button>
+              <button type="submit">Add Trade</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Handle form submission
+    document.getElementById('manualTradeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const tradeData = {
+        id: `manual-${Date.now()}`,
+        instrument: document.getElementById('manualSymbol').value,
+        direction: document.getElementById('manualDirection').value,
+        entry_price: parseFloat(document.getElementById('manualPrice').value),
+        notes: document.getElementById('manualNotes').value,
+        platform: 'Manual Entry',
+        trade_date: new Date().toISOString().split('T')[0],
+        trade_time: new Date().toTimeString().split(' ')[0],
+        timestamp: new Date().toISOString(),
+        trigger: 'manual',
+        synced: false
+      };
+
+      // Save trade
+      this.trades.push(tradeData);
+      await chrome.storage.local.set({ trades: this.trades });
+      
+      modal.remove();
+      this.updateUI();
+      this.showNotification('Trade added', 'Manual trade entry saved');
+    });
+
+    // Handle cancel
+    document.getElementById('cancelManual').addEventListener('click', () => {
+      modal.remove();
+    });
+  }
+
   openSettings() {
-    // Open settings in new tab or show settings modal
     chrome.tabs.create({ 
       url: chrome.runtime.getURL('settings.html') 
     });
   }
 
   openHelp() {
-    // Open help documentation
     chrome.tabs.create({ 
       url: 'https://docs.trade-vision-vault.com/extension' 
     });
@@ -192,8 +322,8 @@ class PopupController {
   async checkAuthStatus() {
     // Check if user is authenticated in the web app
     try {
-      const [tab] = await chrome.tabs.query({ url: 'https://trade-vision-vault.vercel.app/*' });
-      if (tab) {
+      const tabs = await chrome.tabs.query({ url: 'https://trade-vision-vault.vercel.app/*' });
+      if (tabs.length > 0) {
         // User has the web app open, might be authenticated
         // In a real implementation, you'd check the auth state
       }
@@ -207,13 +337,14 @@ class PopupController {
     this.updateAuthStatus();
     this.updateTradesList();
     this.updateSyncStatus();
+    this.updateStats();
   }
 
   updateRecordingButton() {
     const recordBtn = document.getElementById('recordBtn');
     
     if (this.isRecording) {
-      recordBtn.textContent = '⏹️ Stop Recording';
+      recordBtn.innerHTML = '⏹️ Stop Recording';
       recordBtn.className = 'btn btn-destructive';
     } else {
       recordBtn.innerHTML = `
@@ -264,16 +395,27 @@ class PopupController {
       return;
     }
 
-    tradesList.innerHTML = this.trades.slice(0, 5).map(trade => `
-      <div class="trade-item ${trade.synced ? 'synced' : 'pending'}">
+    // Sort trades by timestamp (newest first)
+    const sortedTrades = [...this.trades].sort((a, b) => 
+      new Date(b.timestamp) - new Date(a.timestamp)
+    );
+
+    tradesList.innerHTML = sortedTrades.slice(0, 5).map(trade => `
+      <div class="trade-item ${trade.synced ? 'synced' : 'pending'}" data-trade-id="${trade.id}">
         <div class="trade-header">
           <div class="trade-symbol">${trade.instrument || 'Unknown'}</div>
           <div class="trade-time">${new Date(trade.timestamp).toLocaleTimeString()}</div>
         </div>
         <div class="trade-details">
-          Price: $${trade.entry_price || 'N/A'}
+          <div class="trade-direction ${trade.direction?.toLowerCase()}">${trade.direction || 'N/A'}</div>
+          <div class="trade-price">$${trade.entry_price || 'N/A'}</div>
         </div>
-        <div class="trade-platform">${trade.platform || 'Unknown Platform'}</div>
+        <div class="trade-platform">${trade.platform || 'Unknown'}</div>
+        <div class="trade-actions">
+          <button class="btn-small annotate-btn" onclick="popupController.annotateTrade('${trade.id}')">
+            📝 Tag
+          </button>
+        </div>
       </div>
     `).join('');
   }
@@ -283,17 +425,62 @@ class PopupController {
     const pendingTrades = this.trades.filter(trade => !trade.synced).length;
     
     if (pendingTrades > 0) {
-      syncStatus.textContent = `${pendingTrades} trades pending`;
+      syncStatus.innerHTML = `
+        <span class="sync-pending">${pendingTrades} trades pending</span>
+      `;
     } else if (this.trades.length > 0) {
-      syncStatus.textContent = 'All trades synced';
+      syncStatus.innerHTML = `
+        <span class="sync-complete">All trades synced</span>
+      `;
     } else {
       syncStatus.textContent = 'No trades to sync';
     }
   }
 
-  async getStoredScreenshots() {
-    const result = await chrome.storage.local.get('screenshots');
-    return result.screenshots || [];
+  updateStats() {
+    // Add quick stats if element exists
+    const statsElement = document.getElementById('quickStats');
+    if (statsElement && this.trades.length > 0) {
+      const buyTrades = this.trades.filter(t => t.direction === 'BUY').length;
+      const sellTrades = this.trades.filter(t => t.direction === 'SELL').length;
+      const todayTrades = this.trades.filter(t => 
+        new Date(t.timestamp).toDateString() === new Date().toDateString()
+      ).length;
+
+      statsElement.innerHTML = `
+        <div class="stats-grid">
+          <div class="stat-item">
+            <div class="stat-value">${this.trades.length}</div>
+            <div class="stat-label">Total</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">${todayTrades}</div>
+            <div class="stat-label">Today</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">${buyTrades}</div>
+            <div class="stat-label">Buy</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value">${sellTrades}</div>
+            <div class="stat-label">Sell</div>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  annotateTrade(tradeId) {
+    const trade = this.trades.find(t => t.id === tradeId);
+    if (!trade) return;
+
+    const annotation = prompt('Add a tag/note for this trade:', trade.notes || '');
+    if (annotation !== null) {
+      trade.notes = annotation;
+      chrome.storage.local.set({ trades: this.trades });
+      this.updateUI();
+      this.showNotification('Trade updated', 'Annotation saved');
+    }
   }
 
   showNotification(title, message) {
@@ -308,7 +495,10 @@ class PopupController {
   }
 }
 
+// Make controller globally available
+let popupController;
+
 // Initialize popup when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  new PopupController();
+  popupController = new PopupController();
 });
