@@ -1,5 +1,4 @@
-
-// Tradovate-specific content script with robust trade detection
+// Tradovate-specific content script with improved messaging
 (function() {
   'use strict';
 
@@ -17,20 +16,87 @@
       this.observers = [];
       this.connectionRetries = 0;
       this.maxRetries = 5;
+      this.messageListenerActive = false;
       this.init();
     }
 
     async init() {
       console.log('Initializing Tradovate capture...');
       
+      // Register message listener first
+      this.setupMessageListener();
+      
+      // Register with background script
+      await this.registerWithBackground();
+      
       // Test connection with retry logic
       await this.establishConnection();
       await this.getRecordingStatus();
       this.setupUI();
       this.setupTradeDetection();
-      this.setupMessageListener();
       
       console.log('✅ Tradovate capture initialized successfully');
+    }
+
+    async registerWithBackground() {
+      try {
+        const response = await this.sendMessage({ 
+          type: 'CONTENT_SCRIPT_READY',
+          platform: 'Tradovate',
+          url: window.location.href
+        });
+        
+        if (response && response.success) {
+          console.log('✅ Registered with background script');
+        }
+      } catch (error) {
+        console.error('❌ Failed to register with background:', error);
+      }
+    }
+
+    setupMessageListener() {
+      if (this.messageListenerActive) {
+        console.log('Message listener already active');
+        return;
+      }
+
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        console.log('📨 Tradovate content script received message:', message);
+        
+        try {
+          if (message.type === 'RECORDING_STATUS_UPDATE') {
+            this.isRecording = message.isRecording;
+            this.updateUI();
+            sendResponse({ success: true, received: true });
+          } else if (message.type === 'DIAGNOSTIC_PING') {
+            sendResponse({
+              success: true,
+              platform: 'Tradovate',
+              injected: true,
+              recording: this.isRecording,
+              url: window.location.href,
+              timestamp: Date.now(),
+              messageListenerActive: this.messageListenerActive
+            });
+          } else if (message.type === 'PING') {
+            sendResponse({
+              success: true,
+              pong: true,
+              platform: 'Tradovate'
+            });
+          } else {
+            sendResponse({ success: false, error: 'Unknown message type' });
+          }
+        } catch (error) {
+          console.error('❌ Error handling message:', error);
+          sendResponse({ success: false, error: error.message });
+        }
+        
+        return true;
+      });
+
+      this.messageListenerActive = true;
+      console.log('✅ Message listener registered for Tradovate');
     }
 
     async establishConnection() {
@@ -177,7 +243,7 @@
     setupTradeDetection() {
       console.log('🎯 Setting up Tradovate trade detection...');
       
-      // Tradovate-specific selectors for trade buttons
+      // Enhanced Tradovate-specific selectors
       const tradovateSelectors = [
         '[data-testid*="buy"]',
         '[data-testid*="sell"]',
@@ -187,11 +253,11 @@
         '.sell-button',
         '[class*="buy-order"]',
         '[class*="sell-order"]',
-        'button:contains("Buy")',
-        'button:contains("Sell")'
+        'button[aria-label*="Buy"]',
+        'button[aria-label*="Sell"]'
       ];
       
-      // Set up click listeners
+      // Set up click listeners with improved detection
       document.addEventListener('click', (event) => {
         if (!this.isRecording) return;
         
@@ -200,7 +266,10 @@
         
         if (button) {
           console.log('🎯 Trade button clicked:', button);
-          this.captureTradeClick(button, event);
+          // Add small delay to allow UI updates
+          setTimeout(() => {
+            this.captureTradeClick(button, event);
+          }, 100);
         }
       }, true);
       
@@ -212,12 +281,13 @@
     }
 
     findTradeButton(element, selectors) {
-      // Check if the clicked element or its parents match trade button selectors
+      // Enhanced button detection logic
       for (let current = element; current && current !== document; current = current.parentElement) {
         // Check data attributes
         if (current.dataset) {
           for (const key in current.dataset) {
-            if (key.toLowerCase().includes('buy') || key.toLowerCase().includes('sell')) {
+            const value = current.dataset[key].toLowerCase();
+            if (value.includes('buy') || value.includes('sell')) {
               return current;
             }
           }
@@ -232,19 +302,21 @@
         }
         
         // Check button text
-        if (current.tagName === 'BUTTON') {
+        if (current.tagName === 'BUTTON' || current.role === 'button') {
           const text = current.textContent?.toLowerCase() || '';
-          if (text.includes('buy') || text.includes('sell')) {
+          const ariaLabel = current.getAttribute('aria-label')?.toLowerCase() || '';
+          if (text.includes('buy') || text.includes('sell') || 
+              ariaLabel.includes('buy') || ariaLabel.includes('sell')) {
             return current;
           }
         }
         
-        // Check title attribute
-        if (current.title) {
-          const title = current.title.toLowerCase();
-          if (title.includes('buy') || title.includes('sell')) {
-            return current;
-          }
+        // Check title and aria-label attributes
+        const title = current.title?.toLowerCase() || '';
+        const ariaLabel = current.getAttribute('aria-label')?.toLowerCase() || '';
+        if (title.includes('buy') || title.includes('sell') ||
+            ariaLabel.includes('buy') || ariaLabel.includes('sell')) {
+          return current;
         }
       }
       
@@ -404,11 +476,14 @@
         
         if (response && response.success) {
           console.log('✅ Trade data sent successfully');
+          return true;
         } else {
           console.error('❌ Failed to send trade data:', response);
+          return false;
         }
       } catch (error) {
         console.error('❌ Error sending trade data:', error);
+        return false;
       }
     }
 
@@ -486,29 +561,6 @@
       }
     }
 
-    setupMessageListener() {
-      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        console.log('📨 Tradovate content script received message:', message);
-        
-        if (message.type === 'RECORDING_STATUS_UPDATE') {
-          this.isRecording = message.isRecording;
-          this.updateUI();
-          sendResponse({ success: true });
-        } else if (message.type === 'DIAGNOSTIC_PING') {
-          sendResponse({
-            success: true,
-            platform: 'Tradovate',
-            injected: true,
-            recording: this.isRecording,
-            url: window.location.href,
-            timestamp: Date.now()
-          });
-        }
-        
-        return true;
-      });
-    }
-
     cleanup() {
       this.observers.forEach(observer => observer.disconnect());
       this.observers = [];
@@ -521,7 +573,7 @@
     }
   }
 
-  // Initialize the capture system
+  // Initialize the capture system with error handling
   let captureSystem;
   
   function initCapture() {
