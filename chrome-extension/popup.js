@@ -3,6 +3,7 @@ class PopupController {
     this.isRecording = false;
     this.connectionStatus = 'disconnected';
     this.backgroundConnected = false;
+    this.contextInvalidated = false;
     
     this.init();
   }
@@ -11,10 +12,15 @@ class PopupController {
     console.log('📱 Initializing popup...');
     
     try {
+      // Check if extension context is valid
+      if (!this.isExtensionContextValid()) {
+        this.handleContextInvalidation();
+        return;
+      }
+
       this.setupEventListeners();
       this.showLoadingState();
       
-      // Test background connection with retries
       await this.connectToBackground();
       
       if (this.backgroundConnected) {
@@ -30,13 +36,47 @@ class PopupController {
     }
   }
 
+  isExtensionContextValid() {
+    try {
+      // Test if chrome.runtime is accessible
+      return !!(chrome?.runtime?.id && chrome?.runtime?.sendMessage);
+    } catch (error) {
+      console.error('Extension context check failed:', error);
+      return false;
+    }
+  }
+
+  handleContextInvalidation() {
+    this.contextInvalidated = true;
+    this.backgroundConnected = false;
+    
+    const container = document.querySelector('.popup-container');
+    if (container) {
+      container.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #f59e0b;">
+          <h3>Extension Context Lost</h3>
+          <p>The extension was reloaded or updated. Please close this popup and reopen it.</p>
+          <button onclick="window.close()" style="padding: 8px 16px; margin: 10px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">Close Popup</button>
+          <button onclick="location.reload()" style="padding: 8px 16px; margin: 10px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer;">Try Again</button>
+        </div>
+      `;
+    }
+  }
+
   async connectToBackground() {
+    if (this.contextInvalidated) return;
+    
     const maxRetries = 3;
     let retryCount = 0;
     
     while (retryCount < maxRetries && !this.backgroundConnected) {
       try {
         console.log(`🔄 Connecting to background script (attempt ${retryCount + 1})`);
+        
+        if (!this.isExtensionContextValid()) {
+          this.handleContextInvalidation();
+          return;
+        }
         
         const response = await this.sendMessage({ type: 'PING' }, 2000);
         
@@ -53,13 +93,19 @@ class PopupController {
         retryCount++;
         console.warn(`❌ Connection attempt ${retryCount} failed:`, error.message);
         
+        // Check for context invalidation
+        if (error.message.includes('Extension context invalidated') || 
+            error.message.includes('Receiving end does not exist')) {
+          this.handleContextInvalidation();
+          return;
+        }
+        
         if (retryCount < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms before retry
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
     }
     
-    // All retries failed
     this.backgroundConnected = false;
     this.connectionStatus = 'disconnected';
     throw new Error('Failed to connect to background script after multiple attempts');
@@ -80,8 +126,14 @@ class PopupController {
 
   sendMessage(message, timeout = 5000) {
     return new Promise((resolve, reject) => {
-      if (!chrome?.runtime?.sendMessage) {
-        reject(new Error('Chrome runtime not available'));
+      if (this.contextInvalidated) {
+        reject(new Error('Extension context invalidated'));
+        return;
+      }
+
+      if (!this.isExtensionContextValid()) {
+        this.handleContextInvalidation();
+        reject(new Error('Extension context invalidated'));
         return;
       }
 
@@ -96,8 +148,16 @@ class PopupController {
           clearTimeout(timeoutId);
           
           if (chrome.runtime.lastError) {
-            console.error('❌ Runtime error:', chrome.runtime.lastError.message);
-            reject(new Error(chrome.runtime.lastError.message));
+            const errorMessage = chrome.runtime.lastError.message;
+            console.error('❌ Runtime error:', errorMessage);
+            
+            // Check for context invalidation
+            if (errorMessage.includes('Extension context invalidated') ||
+                errorMessage.includes('Receiving end does not exist')) {
+              this.handleContextInvalidation();
+            }
+            
+            reject(new Error(errorMessage));
           } else {
             console.log('📥 Received response:', response);
             resolve(response);
@@ -105,6 +165,12 @@ class PopupController {
         });
       } catch (error) {
         clearTimeout(timeoutId);
+        console.error('❌ Send message error:', error);
+        
+        if (error.message.includes('Extension context invalidated')) {
+          this.handleContextInvalidation();
+        }
+        
         reject(new Error(`Send message failed: ${error.message}`));
       }
     });
@@ -164,6 +230,11 @@ class PopupController {
   }
 
   async toggleRecording() {
+    if (this.contextInvalidated) {
+      this.showStatus('Extension context lost - please reopen popup', 'error');
+      return;
+    }
+
     if (!this.backgroundConnected) {
       this.showStatus('Background script not connected', 'error');
       return;
@@ -186,13 +257,23 @@ class PopupController {
       }
     } catch (error) {
       console.error('❌ Toggle error:', error);
-      this.handleError('Failed to toggle recording', error);
+      
+      if (error.message.includes('Extension context invalidated')) {
+        this.handleContextInvalidation();
+      } else {
+        this.handleError('Failed to toggle recording', error);
+      }
     } finally {
       this.setButtonLoading('recordBtn', false);
     }
   }
 
   async captureScreenshot() {
+    if (this.contextInvalidated) {
+      this.showStatus('Extension context lost - please reopen popup', 'error');
+      return;
+    }
+
     if (!this.backgroundConnected) {
       this.showStatus('Background script not connected', 'error');
       return;
@@ -208,7 +289,13 @@ class PopupController {
         throw new Error('Capture failed');
       }
     } catch (error) {
-      this.handleError('Screenshot failed', error);
+      console.error('❌ Screenshot error:', error);
+      
+      if (error.message.includes('Extension context invalidated')) {
+        this.handleContextInvalidation();
+      } else {
+        this.handleError('Screenshot failed', error);
+      }
     } finally {
       this.setButtonLoading('screenshotBtn', false);
     }
@@ -273,6 +360,8 @@ class PopupController {
   }
 
   updateUI() {
+    if (this.contextInvalidated) return;
+    
     const recordBtn = document.getElementById('recordBtn');
     if (recordBtn) {
       recordBtn.textContent = this.isRecording ? 'Stop Recording' : 'Record Trade';

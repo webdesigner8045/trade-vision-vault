@@ -1,4 +1,3 @@
-
 // Simplified background service worker with guaranteed message handling
 class ExtensionBackground {
   constructor() {
@@ -18,20 +17,30 @@ class ExtensionBackground {
   }
 
   setupMessageListener() {
-    // CRITICAL: Ensure message listener is always active
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.log('📨 Background received message:', message.type, 'from:', sender.tab?.id || 'popup');
       
       this.messageStats.received++;
       
       try {
+        // Validate chrome APIs are available
+        if (!chrome?.runtime || !chrome?.storage) {
+          console.error('❌ Chrome APIs not available');
+          sendResponse({ 
+            success: false, 
+            error: 'Chrome APIs not available' 
+          });
+          return true;
+        }
+
         // Handle synchronous messages immediately
         if (message.type === 'PING') {
           const response = {
             success: true,
             timestamp: Date.now(),
             backgroundActive: true,
-            ready: this.isReady
+            ready: this.isReady,
+            extensionId: chrome.runtime.id
           };
           console.log('📤 Sending PING response:', response);
           sendResponse(response);
@@ -54,6 +63,7 @@ class ExtensionBackground {
           this.getRecordingStatus().then(status => {
             sendResponse({ success: true, isRecording: status });
           }).catch(error => {
+            console.error('❌ Get recording status error:', error);
             sendResponse({ success: false, error: error.message });
           });
           return true;
@@ -228,19 +238,41 @@ class ExtensionBackground {
   }
 
   async captureScreenshot(tabId) {
-    if (!tabId) return null;
+    if (!tabId) {
+      console.error('❌ No tab ID provided for screenshot');
+      return null;
+    }
 
     try {
+      // Validate chrome APIs are available
+      if (!chrome?.tabs?.captureVisibleTab) {
+        throw new Error('Screenshot API not available');
+      }
+
+      console.log(`📸 Capturing screenshot for tab ${tabId}`);
+      
       const dataUrl = await chrome.tabs.captureVisibleTab({
         format: 'png',
         quality: 80
       });
       
-      console.log('✅ Screenshot captured');
+      if (!dataUrl) {
+        throw new Error('Screenshot capture returned empty result');
+      }
+      
+      console.log('✅ Screenshot captured successfully');
       return dataUrl;
     } catch (error) {
       console.error('❌ Screenshot failed:', error);
-      return null;
+      
+      // Provide more specific error messages
+      if (error.message.includes('Cannot access')) {
+        throw new Error('Cannot capture screenshot - tab may not be visible or accessible');
+      } else if (error.message.includes('not available')) {
+        throw new Error('Screenshot API not available');
+      } else {
+        throw new Error(`Screenshot failed: ${error.message}`);
+      }
     }
   }
 
