@@ -1,20 +1,34 @@
-// Enhanced popup controller with improved messaging
+// Enhanced popup controller with improved connection handling
 class PopupController {
   constructor() {
     this.isRecording = false;
     this.connectionStatus = 'disconnected';
     this.backgroundConnected = false;
+    this.connectionRetries = 0;
+    this.maxRetries = 5;
     this.init();
   }
 
   async init() {
     try {
       console.log('📱 Initializing popup...');
+      
+      // Wait for background script to be ready
+      await this.waitForBackgroundReady();
+      
+      // Test background connection
       await this.testBackgroundConnection();
+      
+      // Load recording status
       await this.loadRecordingStatus();
+      
+      // Setup UI
       this.setupEventListeners();
       this.updateUI();
+      
+      // Run diagnostic
       await this.runQuickDiagnostic();
+      
       console.log('✅ Popup initialized');
     } catch (error) {
       console.error('❌ Popup init failed:', error);
@@ -22,12 +36,38 @@ class PopupController {
     }
   }
 
+  async waitForBackgroundReady() {
+    console.log('🔍 Waiting for background script...');
+    
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      try {
+        const response = await this.sendMessageWithTimeout({ 
+          type: 'CONNECTION_TEST' 
+        }, 2000);
+        
+        if (response && response.success && response.ready) {
+          console.log('✅ Background script is ready');
+          return;
+        }
+        
+        console.log(`⏳ Background not ready yet (attempt ${attempt}/10)`);
+      } catch (error) {
+        console.log(`⏳ Connection attempt ${attempt} failed:`, error.message);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    throw new Error('Background script not ready after timeout');
+  }
+
   async testBackgroundConnection() {
     try {
-      const response = await this.sendMessage({ type: 'PING' });
+      const response = await this.sendMessageWithTimeout({ type: 'PING' }, 3000);
       if (response?.success) {
         this.backgroundConnected = true;
         this.connectionStatus = 'connected';
+        this.connectionRetries = 0;
         console.log('✅ Background connection OK');
       } else {
         throw new Error('Invalid response from background');
@@ -36,8 +76,47 @@ class PopupController {
       this.backgroundConnected = false;
       this.connectionStatus = 'disconnected';
       console.error('❌ Background connection failed:', error);
+      
+      // Retry connection
+      if (this.connectionRetries < this.maxRetries) {
+        this.connectionRetries++;
+        console.log(`🔄 Retrying connection (${this.connectionRetries}/${this.maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        return this.testBackgroundConnection();
+      }
+      
       throw error;
     }
+  }
+
+  sendMessageWithTimeout(message, timeout = 5000) {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Message timeout after ${timeout}ms - background script not responding`));
+      }, timeout);
+
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          clearTimeout(timeoutId);
+          
+          if (chrome.runtime.lastError) {
+            reject(new Error(`Chrome runtime error: ${chrome.runtime.lastError.message}`));
+          } else if (response?.error) {
+            reject(new Error(`Background error: ${response.error}`));
+          } else {
+            resolve(response);
+          }
+        });
+      } catch (error) {
+        clearTimeout(timeoutId);
+        reject(new Error(`Send message failed: ${error.message}`));
+      }
+    });
+  }
+
+  // Legacy method for backward compatibility
+  sendMessage(message, timeout = 5000) {
+    return this.sendMessageWithTimeout(message, timeout);
   }
 
   async runQuickDiagnostic() {
@@ -79,31 +158,6 @@ class PopupController {
       console.log('❌ Diagnostic failed:', error);
       this.showStatus('Diagnostic failed - background script issue', 'error');
     }
-  }
-
-  sendMessage(message, timeout = 5000) {
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        reject(new Error('Message timeout - background script not responding'));
-      }, timeout);
-
-      try {
-        chrome.runtime.sendMessage(message, (response) => {
-          clearTimeout(timeoutId);
-          
-          if (chrome.runtime.lastError) {
-            reject(new Error(`Chrome runtime error: ${chrome.runtime.lastError.message}`));
-          } else if (response?.error) {
-            reject(new Error(`Background error: ${response.error}`));
-          } else {
-            resolve(response);
-          }
-        });
-      } catch (error) {
-        clearTimeout(timeoutId);
-        reject(new Error(`Send message failed: ${error.message}`));
-      }
-    });
   }
 
   async loadRecordingStatus() {
@@ -148,10 +202,10 @@ class PopupController {
     try {
       this.setButtonLoading('recordBtn', true);
       
-      const response = await this.sendMessage({
+      const response = await this.sendMessageWithTimeout({
         type: 'TOGGLE_RECORDING',
         isRecording: !this.isRecording
-      });
+      }, 10000); // Longer timeout for toggle
 
       if (response?.success) {
         this.isRecording = response.isRecording;

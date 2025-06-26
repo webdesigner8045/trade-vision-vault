@@ -1,4 +1,3 @@
-
 // Enhanced background service worker with improved messaging
 class ExtensionBackground {
   constructor() {
@@ -8,34 +7,54 @@ class ExtensionBackground {
     this.injectedTabs = new Set();
     this.messageStats = { sent: 0, received: 0, errors: 0 };
     this.pendingInjections = new Set();
+    this.isReady = false;
     
-    console.log('🚀 Background Script v2.3 starting...');
+    console.log('🚀 Background Script v2.4 starting...');
     this.initializeListeners();
     this.initializeSupabase();
-    this.injectIntoExistingTabs();
+    
+    // Mark as ready after initialization
+    setTimeout(() => {
+      this.isReady = true;
+      console.log('✅ Background script fully ready');
+      this.injectIntoExistingTabs();
+    }, 1000);
   }
 
   initializeListeners() {
-    // Enhanced message listener with better error handling
+    // Enhanced message listener with immediate response capability
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       this.messageStats.received++;
+      
+      // Immediate response for ping/sync messages
+      if (message.type === 'PING' || message.type === 'DIAGNOSTIC_PING') {
+        const response = {
+          success: true,
+          timestamp: Date.now(),
+          backgroundActive: true,
+          backgroundReady: this.isReady,
+          messageStats: this.messageStats
+        };
+        sendResponse(response);
+        return true;
+      }
+
+      // Immediate response for connection test
+      if (message.type === 'CONNECTION_TEST') {
+        sendResponse({ 
+          success: true, 
+          ready: this.isReady,
+          timestamp: Date.now() 
+        });
+        return true;
+      }
+
       console.log('📨 Background received:', {
         type: message.type,
         from: sender.tab?.id || 'popup',
         url: sender.tab?.url,
         frameId: sender.frameId
       });
-      
-      // Handle sync messages immediately
-      if (message.type === 'PING' || message.type === 'DIAGNOSTIC_PING') {
-        sendResponse({
-          success: true,
-          timestamp: Date.now(),
-          backgroundActive: true,
-          messageStats: this.messageStats
-        });
-        return true;
-      }
 
       // Register content script connection
       if (message.type === 'CONTENT_SCRIPT_READY') {
@@ -43,8 +62,18 @@ class ExtensionBackground {
         if (tabId) {
           this.injectedTabs.add(tabId);
           console.log(`✅ Content script registered for tab ${tabId}`);
-          sendResponse({ success: true, registered: true });
+          sendResponse({ success: true, registered: true, backgroundReady: this.isReady });
         }
+        return true;
+      }
+      
+      // Handle async messages only if background is ready
+      if (!this.isReady) {
+        sendResponse({ 
+          success: false, 
+          error: 'Background script not ready yet',
+          retry: true
+        });
         return true;
       }
       
@@ -131,6 +160,13 @@ class ExtensionBackground {
   }
 
   async ensureContentScriptInjected(tabId, url) {
+    // Wait for background to be ready
+    if (!this.isReady) {
+      console.log(`⏳ Background not ready, delaying injection for tab ${tabId}`);
+      setTimeout(() => this.ensureContentScriptInjected(tabId, url), 1000);
+      return;
+    }
+
     // Prevent multiple simultaneous injections
     if (this.pendingInjections.has(tabId)) {
       console.log(`⏳ Injection already pending for tab ${tabId}`);
@@ -157,7 +193,7 @@ class ExtensionBackground {
         scriptFile = 'content-mt4.js';
       }
       
-      // Test if we can execute scripts on this tab with improved error handling
+      // Test if we can execute scripts on this tab
       try {
         const testResult = await chrome.scripting.executeScript({
           target: { tabId },
@@ -166,7 +202,8 @@ class ExtensionBackground {
               ready: true, 
               url: window.location.href,
               origin: window.location.origin,
-              hasListener: !!window.replayLockerInjected
+              hasListener: !!window.replayLockerInjected,
+              timestamp: Date.now()
             };
           }
         });
@@ -183,30 +220,23 @@ class ExtensionBackground {
           
           console.log(`✅ ${scriptFile} injected successfully into tab ${tabId}`);
           
-          // Wait for content script to register
+          // Wait longer for content script to fully initialize
           setTimeout(async () => {
             if (this.injectedTabs.has(tabId)) {
-              // Send initial recording status
+              // Send initial recording status with retry logic
               const isRecording = await this.getRecordingStatus();
-              await this.sendMessageToTab(tabId, {
+              await this.sendMessageToTabWithRetry(tabId, {
                 type: 'RECORDING_STATUS_UPDATE',
                 isRecording: isRecording
               });
             }
-          }, 1500);
+          }, 2000);
         } else {
           console.log(`ℹ️ Content script already present in tab ${tabId}`);
           this.injectedTabs.add(tabId);
         }
       } catch (scriptError) {
         console.error(`❌ Script execution failed for tab ${tabId}:`, scriptError.message);
-        
-        // If it's a permissions error, try alternative injection method
-        if (scriptError.message.includes('Cannot access') || scriptError.message.includes('The extensions gallery')) {
-          console.log(`⚠️ Permissions issue detected, skipping tab ${tabId}`);
-          return;
-        }
-        
         throw scriptError;
       }
       
@@ -215,6 +245,29 @@ class ExtensionBackground {
     } finally {
       this.pendingInjections.delete(tabId);
     }
+  }
+
+  async sendMessageToTabWithRetry(tabId, message, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await chrome.tabs.sendMessage(tabId, message);
+        console.log(`📤 Message sent to tab ${tabId} (attempt ${attempt}):`, message.type);
+        return true;
+      } catch (error) {
+        console.log(`❌ Message attempt ${attempt} failed for tab ${tabId}:`, error.message);
+        
+        if (attempt === maxRetries) {
+          // Remove from injected tabs if all attempts fail
+          this.injectedTabs.delete(tabId);
+          console.error(`❌ All message attempts failed for tab ${tabId}`);
+          return false;
+        }
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+    return false;
   }
 
   async injectIntoExistingTabs() {
@@ -422,5 +475,5 @@ class ExtensionBackground {
 }
 
 // Initialize background script
-console.log('🚀 Initializing Background Script v2.3');
+console.log('🚀 Initializing Background Script v2.4');
 const backgroundInstance = new ExtensionBackground();

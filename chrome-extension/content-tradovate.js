@@ -1,4 +1,4 @@
-// Tradovate-specific content script with improved messaging and domain handling
+// Tradovate-specific content script with improved connection handling
 (function() {
   'use strict';
 
@@ -16,9 +16,11 @@
       this.isRecording = false;
       this.observers = [];
       this.connectionRetries = 0;
-      this.maxRetries = 5;
+      this.maxRetries = 10;
       this.messageListenerActive = false;
       this.platform = this.detectPlatform();
+      this.backgroundReady = false;
+      this.connectionEstablished = false;
       this.init();
     }
 
@@ -37,36 +39,89 @@
     async init() {
       console.log(`Initializing ${this.platform} capture...`);
       
+      // Wait for page to be fully loaded
+      await this.waitForPageLoad();
+      
       // Register message listener first
       this.setupMessageListener();
+      
+      // Wait for background script to be ready
+      await this.waitForBackgroundReady();
       
       // Register with background script
       await this.registerWithBackground();
       
-      // Test connection with retry logic
+      // Establish connection with retry logic
       await this.establishConnection();
+      
+      // Get initial recording status
       await this.getRecordingStatus();
+      
+      // Setup UI and trade detection
       this.setupUI();
       this.setupTradeDetection();
       
       console.log(`✅ ${this.platform} capture initialized successfully`);
     }
 
+    async waitForPageLoad() {
+      if (document.readyState === 'complete') {
+        return;
+      }
+      
+      return new Promise((resolve) => {
+        const checkReady = () => {
+          if (document.readyState === 'complete') {
+            resolve();
+          } else {
+            setTimeout(checkReady, 100);
+          }
+        };
+        checkReady();
+      });
+    }
+
+    async waitForBackgroundReady() {
+      console.log('🔍 Waiting for background script to be ready...');
+      
+      for (let attempt = 1; attempt <= 30; attempt++) {
+        try {
+          const response = await this.sendMessageWithTimeout({ 
+            type: 'CONNECTION_TEST' 
+          }, 2000);
+          
+          if (response && response.success && response.ready) {
+            this.backgroundReady = true;
+            console.log('✅ Background script is ready');
+            return;
+          }
+        } catch (error) {
+          console.log(`⏳ Background not ready yet (attempt ${attempt}/30):`, error.message);
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      console.warn('⚠️ Background script readiness check timed out, proceeding anyway');
+    }
+
     async registerWithBackground() {
       try {
-        const response = await this.sendMessage({ 
+        const response = await this.sendMessageWithTimeout({ 
           type: 'CONTENT_SCRIPT_READY',
           platform: this.platform,
           url: window.location.href,
           origin: window.location.origin
-        });
+        }, 5000);
         
         if (response && response.success) {
           console.log('✅ Registered with background script');
+          return true;
         }
       } catch (error) {
         console.error('❌ Failed to register with background:', error);
       }
+      return false;
     }
 
     setupMessageListener() {
@@ -77,7 +132,7 @@
 
       // Enhanced message listener with better error handling
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        console.log(`📨 ${this.platform} content script received message:`, message);
+        console.log(`📨 ${this.platform} content script received message:`, message.type);
         
         try {
           if (message.type === 'RECORDING_STATUS_UPDATE') {
@@ -93,7 +148,8 @@
               url: window.location.href,
               origin: window.location.origin,
               timestamp: Date.now(),
-              messageListenerActive: this.messageListenerActive
+              messageListenerActive: this.messageListenerActive,
+              connectionEstablished: this.connectionEstablished
             });
           } else if (message.type === 'PING') {
             sendResponse({
@@ -119,10 +175,11 @@
 
     async establishConnection() {
       try {
-        const response = await this.sendMessage({ type: 'PING' });
+        const response = await this.sendMessageWithTimeout({ type: 'PING' }, 5000);
         if (response && response.success) {
           console.log('✅ Background connection established');
           this.connectionRetries = 0;
+          this.connectionEstablished = true;
           return true;
         }
         throw new Error('Invalid ping response');
@@ -141,29 +198,34 @@
       }
     }
 
-    async sendMessage(message) {
+    sendMessageWithTimeout(message, timeout = 5000) {
       return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('Message timeout'));
-        }, 5000);
+        const timeoutId = setTimeout(() => {
+          reject(new Error(`Message timeout after ${timeout}ms`));
+        }, timeout);
 
         try {
           chrome.runtime.sendMessage(message, (response) => {
-            clearTimeout(timeout);
+            clearTimeout(timeoutId);
             
             if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
+              reject(new Error(`Chrome runtime error: ${chrome.runtime.lastError.message}`));
             } else if (response && response.error) {
-              reject(new Error(response.error));
+              reject(new Error(`Background error: ${response.error}`));
             } else {
               resolve(response);
             }
           });
         } catch (error) {
-          clearTimeout(timeout);
-          reject(error);
+          clearTimeout(timeoutId);
+          reject(new Error(`Send message failed: ${error.message}`));
         }
       });
+    }
+
+    // Legacy method for backward compatibility
+    async sendMessage(message) {
+      return this.sendMessageWithTimeout(message, 5000);
     }
 
     async getRecordingStatus() {
@@ -606,7 +668,7 @@
     }
   }
 
-  // Initialize the capture system with error handling
+  // Initialize the capture system with improved error handling
   let captureSystem;
   
   function initCapture() {
@@ -614,15 +676,18 @@
       captureSystem = new TradovateCapture();
     } catch (error) {
       console.error(`❌ Failed to initialize ${window.location.hostname} capture:`, error);
-      setTimeout(initCapture, 3000);
+      // Retry initialization after longer delay
+      setTimeout(initCapture, 5000);
     }
   }
 
-  // Wait for page to be ready
+  // Wait for page to be ready with longer delays
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initCapture);
+    document.addEventListener('DOMContentLoaded', () => {
+      setTimeout(initCapture, 2000);
+    });
   } else {
-    setTimeout(initCapture, 1000);
+    setTimeout(initCapture, 2000);
   }
 
   // Cleanup on page unload
