@@ -1,5 +1,5 @@
 
-// Simplified background service worker focused on core functionality
+// Simplified background service worker with guaranteed message handling
 class ExtensionBackground {
   constructor() {
     this.injectedTabs = new Set();
@@ -7,72 +7,93 @@ class ExtensionBackground {
     this.isReady = false;
     
     console.log('🚀 Background Script starting...');
-    this.initializeListeners();
+    this.setupMessageListener();
+    this.setupOtherListeners();
     
     // Mark as ready after short delay
     setTimeout(() => {
       this.isReady = true;
       console.log('✅ Background script ready');
-    }, 500);
+    }, 100);
   }
 
-  initializeListeners() {
-    // Core message listener
+  setupMessageListener() {
+    // CRITICAL: Ensure message listener is always active
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log('📨 Background received message:', message.type, 'from:', sender.tab?.id || 'popup');
+      
       this.messageStats.received++;
       
-      console.log('📨 Background received:', {
-        type: message.type,
-        from: sender.tab?.id || 'popup'
-      });
-
-      // Handle sync messages immediately
-      if (message.type === 'PING') {
-        sendResponse({
-          success: true,
-          timestamp: Date.now(),
-          backgroundActive: true,
-          ready: this.isReady
-        });
-        return true;
-      }
-
-      // Register content script
-      if (message.type === 'CONTENT_SCRIPT_READY') {
-        const tabId = sender.tab?.id;
-        if (tabId) {
-          this.injectedTabs.add(tabId);
-          console.log(`✅ Content script registered for tab ${tabId}`);
-          sendResponse({ success: true, registered: true });
+      try {
+        // Handle synchronous messages immediately
+        if (message.type === 'PING') {
+          const response = {
+            success: true,
+            timestamp: Date.now(),
+            backgroundActive: true,
+            ready: this.isReady
+          };
+          console.log('📤 Sending PING response:', response);
+          sendResponse(response);
+          return true;
         }
-        return true;
-      }
-      
-      // Handle other messages async
-      this.handleMessage(message, sender)
-        .then(result => {
+
+        if (message.type === 'CONTENT_SCRIPT_READY') {
+          const tabId = sender.tab?.id;
+          if (tabId) {
+            this.injectedTabs.add(tabId);
+            console.log(`✅ Content script registered for tab ${tabId}`);
+            sendResponse({ success: true, registered: true });
+          } else {
+            sendResponse({ success: false, error: 'No tab ID' });
+          }
+          return true;
+        }
+
+        if (message.type === 'GET_RECORDING_STATUS') {
+          this.getRecordingStatus().then(status => {
+            sendResponse({ success: true, isRecording: status });
+          }).catch(error => {
+            sendResponse({ success: false, error: error.message });
+          });
+          return true;
+        }
+
+        // Handle async messages
+        this.handleAsyncMessage(message, sender).then(result => {
           this.messageStats.sent++;
           sendResponse(result);
-        })
-        .catch(error => {
+        }).catch(error => {
           this.messageStats.errors++;
           console.error('❌ Message error:', error);
           sendResponse({ 
-            error: error.message, 
-            success: false 
+            success: false,
+            error: error.message
           });
         });
-      
-      return true; // Keep message channel open for async response
+        
+        return true; // Keep message channel open
+        
+      } catch (error) {
+        console.error('❌ Message handler error:', error);
+        sendResponse({ 
+          success: false,
+          error: error.message 
+        });
+        return true;
+      }
     });
+    
+    console.log('✅ Message listener registered');
+  }
 
+  setupOtherListeners() {
     // Tab update listener
     chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       if (changeInfo.status === 'complete' && tab.url) {
-        this.injectedTabs.delete(tabId); // Reset injection status
+        this.injectedTabs.delete(tabId);
         
         if (this.shouldInjectIntoUrl(tab.url)) {
-          // Wait for page to settle before injecting
           setTimeout(() => {
             this.ensureContentScriptInjected(tabId, tab.url);
           }, 1000);
@@ -100,7 +121,6 @@ class ExtensionBackground {
       'topstep.tradovate.com',
       'trader.tradovate.com'
     ];
-
     return supportedDomains.some(domain => url.includes(domain));
   }
 
@@ -112,7 +132,6 @@ class ExtensionBackground {
     try {
       console.log(`🔍 Injecting content script into tab ${tabId}`);
       
-      // Determine which script to inject
       let scriptFile;
       if (url.includes('tradingview.com')) {
         scriptFile = 'content-tradingview.js';
@@ -122,7 +141,6 @@ class ExtensionBackground {
         return;
       }
       
-      // Inject the content script
       await chrome.scripting.executeScript({
         target: { tabId },
         files: [scriptFile]
@@ -135,16 +153,12 @@ class ExtensionBackground {
     }
   }
 
-  async handleMessage(message, sender) {
-    console.log('🔄 Processing message:', message.type);
+  async handleAsyncMessage(message, sender) {
+    console.log('🔄 Processing async message:', message.type);
     
     switch (message.type) {
       case 'TRADE_DETECTED':
         return await this.handleTradeDetection(message.data, sender.tab);
-
-      case 'GET_RECORDING_STATUS':
-        const status = await this.getRecordingStatus();
-        return { success: true, isRecording: status };
 
       case 'TOGGLE_RECORDING':
         const newStatus = await this.toggleRecording(message.isRecording);
@@ -248,6 +262,6 @@ class ExtensionBackground {
   }
 }
 
-// Initialize background script
+// Initialize background script immediately
 console.log('🚀 Initializing Background Script');
 const backgroundInstance = new ExtensionBackground();

@@ -1,4 +1,3 @@
-
 // Simplified Tradovate content script
 (function() {
   'use strict';
@@ -32,29 +31,13 @@
       console.log('✅ Tradovate capture initialized');
     }
 
-    async registerWithBackground() {
-      try {
-        const response = await this.sendMessage({ 
-          type: 'CONTENT_SCRIPT_READY',
-          platform: this.platform,
-          url: window.location.href
-        });
-        
-        if (response?.success) {
-          console.log('✅ Registered with background script');
-          return true;
-        }
-      } catch (error) {
-        console.error('❌ Failed to register with background:', error);
-      }
-      return false;
-    }
-
     setupMessageListener() {
       if (this.messageListenerActive) {
+        console.log('Message listener already active');
         return;
       }
 
+      // CRITICAL: Ensure this listener stays active
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log('📨 Content script received message:', message.type);
         
@@ -62,24 +45,56 @@
           if (message.type === 'RECORDING_STATUS_UPDATE') {
             this.isRecording = message.isRecording;
             this.updateUI();
+            console.log('📊 Recording status updated:', this.isRecording);
             sendResponse({ success: true });
-          } else {
-            sendResponse({ success: false, error: 'Unknown message type' });
+            return true;
           }
+          
+          // Handle other message types
+          sendResponse({ success: false, error: 'Unknown message type' });
+          return true;
+          
         } catch (error) {
           console.error('❌ Error handling message:', error);
           sendResponse({ success: false, error: error.message });
+          return true;
         }
-        
-        return true;
       });
 
       this.messageListenerActive = true;
-      console.log('✅ Message listener registered');
+      console.log('✅ Message listener registered and active');
     }
 
-    sendMessage(message, timeout = 3000) {
+    async registerWithBackground() {
+      try {
+        console.log('📝 Registering with background script...');
+        const response = await this.sendMessage({ 
+          type: 'CONTENT_SCRIPT_READY',
+          platform: this.platform,
+          url: window.location.href
+        });
+        
+        if (response?.success) {
+          console.log('✅ Successfully registered with background script');
+          return true;
+        } else {
+          console.warn('⚠️ Background registration failed:', response);
+        }
+      } catch (error) {
+        console.error('❌ Failed to register with background:', error);
+      }
+      return false;
+    }
+
+    sendMessage(message, timeout = 5000) {
       return new Promise((resolve, reject) => {
+        if (!chrome?.runtime?.sendMessage) {
+          reject(new Error('Chrome runtime not available'));
+          return;
+        }
+
+        console.log('📤 Content script sending message:', message.type);
+
         const timeoutId = setTimeout(() => {
           reject(new Error(`Message timeout after ${timeout}ms`));
         }, timeout);
@@ -89,8 +104,10 @@
             clearTimeout(timeoutId);
             
             if (chrome.runtime.lastError) {
+              console.error('❌ Runtime error:', chrome.runtime.lastError.message);
               reject(new Error(chrome.runtime.lastError.message));
             } else {
+              console.log('📥 Content script received response:', response);
               resolve(response);
             }
           });
@@ -105,7 +122,7 @@
       try {
         const response = await this.sendMessage({ type: 'GET_RECORDING_STATUS' });
         this.isRecording = response?.isRecording || false;
-        console.log('📊 Recording status:', this.isRecording);
+        console.log('📊 Recording status loaded:', this.isRecording);
       } catch (error) {
         console.error('Failed to get recording status:', error);
         this.isRecording = false;
@@ -117,6 +134,12 @@
     }
 
     createRecordingIndicator() {
+      // Remove existing indicator if present
+      const existing = document.getElementById('tradovate-recording-indicator');
+      if (existing) {
+        existing.remove();
+      }
+
       const indicator = document.createElement('div');
       indicator.id = 'tradovate-recording-indicator';
       indicator.style.cssText = `
@@ -137,15 +160,12 @@
         user-select: none;
       `;
       
-      indicator.innerHTML = `
-        <span style="display: inline-block; width: 8px; height: 8px; background: white; border-radius: 50%; margin-right: 6px; ${this.isRecording ? 'animation: pulse 1s infinite;' : ''}"></span>
-        ${this.isRecording ? 'Recording' : 'Paused'} | ${this.platform}
-      `;
+      this.updateIndicatorContent(indicator);
       
       indicator.addEventListener('click', () => this.toggleRecording());
       document.body.appendChild(indicator);
       
-      // Add pulse animation CSS
+      // Add pulse animation CSS if not exists
       if (!document.getElementById('tradovate-styles')) {
         const style = document.createElement('style');
         style.id = 'tradovate-styles';
@@ -159,10 +179,16 @@
       }
     }
 
+    updateIndicatorContent(indicator) {
+      indicator.innerHTML = `
+        <span style="display: inline-block; width: 8px; height: 8px; background: white; border-radius: 50%; margin-right: 6px; ${this.isRecording ? 'animation: pulse 1s infinite;' : ''}"></span>
+        ${this.isRecording ? 'Recording' : 'Paused'} | ${this.platform}
+      `;
+    }
+
     setupTradeDetection() {
       console.log('🎯 Setting up trade detection...');
       
-      // Simple click detection for trade buttons
       document.addEventListener('click', (event) => {
         if (!this.isRecording) return;
         
@@ -182,13 +208,11 @@
 
     findTradeButton(element) {
       for (let current = element; current && current !== document; current = current.parentElement) {
-        // Check data attributes
         const dataQa = current.getAttribute('data-qa');
         if (dataQa && (dataQa.includes('buy') || dataQa.includes('sell'))) {
           return current;
         }
         
-        // Check class names and text content
         if (current.tagName === 'BUTTON' || current.role === 'button') {
           const text = current.textContent?.toLowerCase() || '';
           const classes = current.className?.toLowerCase() || '';
@@ -322,10 +346,7 @@
       const indicator = document.getElementById('tradovate-recording-indicator');
       if (indicator) {
         indicator.style.background = this.isRecording ? '#10b981' : '#6b7280';
-        indicator.innerHTML = `
-          <span style="display: inline-block; width: 8px; height: 8px; background: white; border-radius: 50%; margin-right: 6px; ${this.isRecording ? 'animation: pulse 1s infinite;' : ''}"></span>
-          ${this.isRecording ? 'Recording' : 'Paused'} | ${this.platform}
-        `;
+        this.updateIndicatorContent(indicator);
       }
     }
   }
