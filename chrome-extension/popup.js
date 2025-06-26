@@ -1,45 +1,20 @@
-// Global error handler for popup
-window.addEventListener('error', (e) => {
-  console.error('🚨 Popup Error:', e.error?.message || e.message, e.filename, e.lineno);
-});
 
-window.addEventListener('unhandledrejection', (e) => {
-  console.error('🚨 Popup Promise Rejection:', e.reason);
-});
-
-// Enhanced popup controller with improved connection handling
 class PopupController {
   constructor() {
     this.isRecording = false;
     this.connectionStatus = 'disconnected';
     this.backgroundConnected = false;
-    this.connectionRetries = 0;
-    this.maxRetries = 5;
     
-    // Wrap initialization in try-catch
-    this.safeInit();
-  }
-
-  async safeInit() {
-    try {
-      console.log('📱 Initializing popup...');
-      await this.init();
-    } catch (error) {
-      console.error('❌ Popup initialization failed:', error);
-      this.handleError('Failed to initialize popup', error);
-    }
+    this.init();
   }
 
   async init() {
+    console.log('📱 Initializing popup...');
+    
     try {
-      console.log('📱 Initializing popup...');
-      
-      // Setup UI first to show loading state
+      // Setup UI first
       this.setupEventListeners();
       this.showLoadingState();
-      
-      // Wait for background script to be ready
-      await this.waitForBackgroundReady();
       
       // Test background connection
       await this.testBackgroundConnection();
@@ -47,13 +22,13 @@ class PopupController {
       // Load recording status
       await this.loadRecordingStatus();
       
-      // Update UI with actual state
+      // Update UI
       this.updateUI();
       
       // Run diagnostic
       await this.runQuickDiagnostic();
       
-      console.log('✅ Popup initialized');
+      console.log('✅ Popup initialized successfully');
     } catch (error) {
       console.error('❌ Popup init failed:', error);
       this.handleError('Initialization failed', error);
@@ -67,47 +42,18 @@ class PopupController {
       recordBtn.disabled = true;
     }
 
-    const authStatus = document.getElementById('authStatus');
-    if (authStatus) {
-      const userEmail = authStatus.querySelector('#userEmail');
-      if (userEmail) {
-        userEmail.textContent = 'Connecting...';
-      }
+    const userEmail = document.getElementById('userEmail');
+    if (userEmail) {
+      userEmail.textContent = 'Connecting...';
     }
-  }
-
-  async waitForBackgroundReady() {
-    console.log('🔍 Waiting for background script...');
-    
-    for (let attempt = 1; attempt <= 10; attempt++) {
-      try {
-        const response = await this.sendMessageWithTimeout({ 
-          type: 'CONNECTION_TEST' 
-        }, 2000);
-        
-        if (response && response.success && response.ready) {
-          console.log('✅ Background script is ready');
-          return;
-        }
-        
-        console.log(`⏳ Background not ready yet (attempt ${attempt}/10)`);
-      } catch (error) {
-        console.log(`⏳ Connection attempt ${attempt} failed:`, error.message);
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    throw new Error('Background script not ready after timeout');
   }
 
   async testBackgroundConnection() {
     try {
-      const response = await this.sendMessageWithTimeout({ type: 'PING' }, 3000);
+      const response = await this.sendMessage({ type: 'PING' });
       if (response?.success) {
         this.backgroundConnected = true;
         this.connectionStatus = 'connected';
-        this.connectionRetries = 0;
         console.log('✅ Background connection OK');
       } else {
         throw new Error('Invalid response from background');
@@ -116,23 +62,14 @@ class PopupController {
       this.backgroundConnected = false;
       this.connectionStatus = 'disconnected';
       console.error('❌ Background connection failed:', error);
-      
-      // Retry connection
-      if (this.connectionRetries < this.maxRetries) {
-        this.connectionRetries++;
-        console.log(`🔄 Retrying connection (${this.connectionRetries}/${this.maxRetries})...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        return this.testBackgroundConnection();
-      }
-      
       throw error;
     }
   }
 
-  sendMessageWithTimeout(message, timeout = 5000) {
+  sendMessage(message, timeout = 5000) {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new Error(`Message timeout after ${timeout}ms - background script not responding`));
+        reject(new Error(`Message timeout after ${timeout}ms`));
       }, timeout);
 
       try {
@@ -152,11 +89,6 @@ class PopupController {
         reject(new Error(`Send message failed: ${error.message}`));
       }
     });
-  }
-
-  // Legacy method for backward compatibility
-  sendMessage(message, timeout = 5000) {
-    return this.sendMessageWithTimeout(message, timeout);
   }
 
   async runQuickDiagnostic() {
@@ -185,11 +117,6 @@ class PopupController {
         // Show warnings if needed
         if (diagnostic.relevantTabs > 0 && diagnostic.injectedTabs === 0) {
           this.showStatus('Content scripts not active. Try refreshing trading pages.', 'warning');
-        } else if (diagnostic.communicationTests) {
-          const failedTests = diagnostic.communicationTests.filter(test => test.status === 'failed');
-          if (failedTests.length > 0) {
-            this.showStatus(`${failedTests.length} content script(s) not responding`, 'warning');
-          }
         }
       }
     } catch (error) {
@@ -280,10 +207,10 @@ class PopupController {
     try {
       this.setButtonLoading('recordBtn', true);
       
-      const response = await this.sendMessageWithTimeout({
+      const response = await this.sendMessage({
         type: 'TOGGLE_RECORDING',
         isRecording: !this.isRecording
-      }, 10000);
+      });
 
       if (response?.success) {
         this.isRecording = response.isRecording;
@@ -477,7 +404,7 @@ class PopupController {
   }
 }
 
-// Safe initialization with better error handling
+// Initialize when DOM is ready
 function initializePopup() {
   try {
     console.log('🚀 Starting popup initialization...');
@@ -508,18 +435,9 @@ function initializePopup() {
   }
 }
 
-// Initialize when DOM is ready with multiple fallbacks
+// Wait for DOM to be ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initializePopup);
 } else {
-  // DOM is already loaded
-  setTimeout(initializePopup, 100);
+  initializePopup();
 }
-
-// Fallback initialization after a delay
-setTimeout(() => {
-  if (!window.popupController) {
-    console.log('🔄 Fallback initialization...');
-    initializePopup();
-  }
-}, 1000);

@@ -144,27 +144,6 @@
     </div>
   </div>
   
-  <script>
-    // Error handling wrapper to catch any popup errors
-    window.addEventListener('error', function(e) {
-      console.error('Popup Error:', e.error, e.filename, e.lineno);
-    });
-    
-    window.addEventListener('unhandledrejection', function(e) {
-      console.error('Popup Promise Rejection:', e.reason);
-    });
-    
-    // Load the main popup script with error handling
-    try {
-      const script = document.createElement('script');
-      script.src = 'popup.js';
-      script.onerror = function() {
-        console.error('Failed to load popup.js');
-      };
-      document.head.appendChild(script);
-    } catch (error) {
-      console.error('Error loading popup script:', error);
-    }
-  </script>
+  <script src="popup.js"></script>
 </body>
 </html>

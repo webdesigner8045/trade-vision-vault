@@ -9,7 +9,7 @@ class ExtensionBackground {
     this.pendingInjections = new Set();
     this.isReady = false;
     
-    console.log('🚀 Background Script v2.4 starting...');
+    console.log('🚀 Background Script v2.5 starting...');
     this.initializeListeners();
     this.initializeSupabase();
     
@@ -26,20 +26,25 @@ class ExtensionBackground {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       this.messageStats.received++;
       
-      // Immediate response for ping/sync messages
-      if (message.type === 'PING' || message.type === 'DIAGNOSTIC_PING') {
-        const response = {
+      console.log('📨 Background received:', {
+        type: message.type,
+        from: sender.tab?.id || 'popup',
+        url: sender.tab?.url?.substring(0, 50) + '...',
+        frameId: sender.frameId
+      });
+
+      // Handle sync messages immediately
+      if (message.type === 'PING') {
+        sendResponse({
           success: true,
           timestamp: Date.now(),
           backgroundActive: true,
           backgroundReady: this.isReady,
           messageStats: this.messageStats
-        };
-        sendResponse(response);
+        });
         return true;
       }
 
-      // Immediate response for connection test
       if (message.type === 'CONNECTION_TEST') {
         sendResponse({ 
           success: true, 
@@ -48,13 +53,6 @@ class ExtensionBackground {
         });
         return true;
       }
-
-      console.log('📨 Background received:', {
-        type: message.type,
-        from: sender.tab?.id || 'popup',
-        url: sender.tab?.url,
-        frameId: sender.frameId
-      });
 
       // Register content script connection
       if (message.type === 'CONTENT_SCRIPT_READY') {
@@ -67,17 +65,7 @@ class ExtensionBackground {
         return true;
       }
       
-      // Handle async messages only if background is ready
-      if (!this.isReady) {
-        sendResponse({ 
-          success: false, 
-          error: 'Background script not ready yet',
-          retry: true
-        });
-        return true;
-      }
-      
-      // Handle async messages
+      // Handle other messages
       this.handleMessage(message, sender)
         .then(result => {
           this.messageStats.sent++;
@@ -475,5 +463,5 @@ class ExtensionBackground {
 }
 
 // Initialize background script
-console.log('🚀 Initializing Background Script v2.4');
+console.log('🚀 Initializing Background Script v2.5');
 const backgroundInstance = new ExtensionBackground();

@@ -15,12 +15,8 @@
     constructor() {
       this.isRecording = false;
       this.observers = [];
-      this.connectionRetries = 0;
-      this.maxRetries = 10;
-      this.messageListenerActive = false;
       this.platform = this.detectPlatform();
-      this.backgroundReady = false;
-      this.connectionEstablished = false;
+      this.messageListenerActive = false;
       this.init();
     }
 
@@ -39,20 +35,11 @@
     async init() {
       console.log(`Initializing ${this.platform} capture...`);
       
-      // Wait for page to be fully loaded
-      await this.waitForPageLoad();
-      
-      // Register message listener first
+      // Setup message listener first
       this.setupMessageListener();
-      
-      // Wait for background script to be ready
-      await this.waitForBackgroundReady();
       
       // Register with background script
       await this.registerWithBackground();
-      
-      // Establish connection with retry logic
-      await this.establishConnection();
       
       // Get initial recording status
       await this.getRecordingStatus();
@@ -64,55 +51,14 @@
       console.log(`✅ ${this.platform} capture initialized successfully`);
     }
 
-    async waitForPageLoad() {
-      if (document.readyState === 'complete') {
-        return;
-      }
-      
-      return new Promise((resolve) => {
-        const checkReady = () => {
-          if (document.readyState === 'complete') {
-            resolve();
-          } else {
-            setTimeout(checkReady, 100);
-          }
-        };
-        checkReady();
-      });
-    }
-
-    async waitForBackgroundReady() {
-      console.log('🔍 Waiting for background script to be ready...');
-      
-      for (let attempt = 1; attempt <= 30; attempt++) {
-        try {
-          const response = await this.sendMessageWithTimeout({ 
-            type: 'CONNECTION_TEST' 
-          }, 2000);
-          
-          if (response && response.success && response.ready) {
-            this.backgroundReady = true;
-            console.log('✅ Background script is ready');
-            return;
-          }
-        } catch (error) {
-          console.log(`⏳ Background not ready yet (attempt ${attempt}/30):`, error.message);
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      
-      console.warn('⚠️ Background script readiness check timed out, proceeding anyway');
-    }
-
     async registerWithBackground() {
       try {
-        const response = await this.sendMessageWithTimeout({ 
+        const response = await this.sendMessage({ 
           type: 'CONTENT_SCRIPT_READY',
           platform: this.platform,
           url: window.location.href,
           origin: window.location.origin
-        }, 5000);
+        });
         
         if (response && response.success) {
           console.log('✅ Registered with background script');
@@ -130,7 +76,6 @@
         return;
       }
 
-      // Enhanced message listener with better error handling
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log(`📨 ${this.platform} content script received message:`, message.type);
         
@@ -147,9 +92,7 @@
               recording: this.isRecording,
               url: window.location.href,
               origin: window.location.origin,
-              timestamp: Date.now(),
-              messageListenerActive: this.messageListenerActive,
-              connectionEstablished: this.connectionEstablished
+              timestamp: Date.now()
             });
           } else if (message.type === 'PING') {
             sendResponse({
@@ -173,32 +116,7 @@
       console.log(`✅ Message listener registered for ${this.platform}`);
     }
 
-    async establishConnection() {
-      try {
-        const response = await this.sendMessageWithTimeout({ type: 'PING' }, 5000);
-        if (response && response.success) {
-          console.log('✅ Background connection established');
-          this.connectionRetries = 0;
-          this.connectionEstablished = true;
-          return true;
-        }
-        throw new Error('Invalid ping response');
-      } catch (error) {
-        console.error(`❌ Connection attempt ${this.connectionRetries + 1} failed:`, error);
-        this.connectionRetries++;
-        
-        if (this.connectionRetries < this.maxRetries) {
-          console.log(`Retrying connection in 2 seconds...`);
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          return this.establishConnection();
-        } else {
-          console.error('❌ Max connection retries reached');
-          throw error;
-        }
-      }
-    }
-
-    sendMessageWithTimeout(message, timeout = 5000) {
+    sendMessage(message, timeout = 5000) {
       return new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
           reject(new Error(`Message timeout after ${timeout}ms`));
@@ -221,11 +139,6 @@
           reject(new Error(`Send message failed: ${error.message}`));
         }
       });
-    }
-
-    // Legacy method for backward compatibility
-    async sendMessage(message) {
-      return this.sendMessageWithTimeout(message, 5000);
     }
 
     async getRecordingStatus() {
@@ -668,33 +581,21 @@
     }
   }
 
-  // Initialize the capture system with improved error handling
-  let captureSystem;
-  
+  // Initialize with simple error handling
   function initCapture() {
     try {
-      captureSystem = new TradovateCapture();
+      new TradovateCapture();
     } catch (error) {
       console.error(`❌ Failed to initialize ${window.location.hostname} capture:`, error);
-      // Retry initialization after longer delay
-      setTimeout(initCapture, 5000);
     }
   }
 
-  // Wait for page to be ready with longer delays
+  // Initialize when ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-      setTimeout(initCapture, 2000);
-    });
+    document.addEventListener('DOMContentLoaded', initCapture);
   } else {
-    setTimeout(initCapture, 2000);
+    setTimeout(initCapture, 1000);
   }
-
-  // Cleanup on page unload
-  window.addEventListener('beforeunload', () => {
-    if (captureSystem) {
-      captureSystem.cleanup();
-    }
-  });
-
 })();
+
+</edits_to_apply>
