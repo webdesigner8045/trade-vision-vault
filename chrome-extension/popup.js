@@ -1,3 +1,4 @@
+
 // Enhanced popup controller with improved connection handling
 class PopupController {
   constructor() {
@@ -13,6 +14,10 @@ class PopupController {
     try {
       console.log('📱 Initializing popup...');
       
+      // Setup UI first to show loading state
+      this.setupEventListeners();
+      this.showLoadingState();
+      
       // Wait for background script to be ready
       await this.waitForBackgroundReady();
       
@@ -22,8 +27,7 @@ class PopupController {
       // Load recording status
       await this.loadRecordingStatus();
       
-      // Setup UI
-      this.setupEventListeners();
+      // Update UI with actual state
       this.updateUI();
       
       // Run diagnostic
@@ -33,6 +37,22 @@ class PopupController {
     } catch (error) {
       console.error('❌ Popup init failed:', error);
       this.handleError('Initialization failed', error);
+    }
+  }
+
+  showLoadingState() {
+    const recordBtn = document.getElementById('recordBtn');
+    if (recordBtn) {
+      recordBtn.textContent = 'Loading...';
+      recordBtn.disabled = true;
+    }
+
+    const authStatus = document.getElementById('authStatus');
+    if (authStatus) {
+      const userEmail = authStatus.querySelector('#userEmail');
+      if (userEmail) {
+        userEmail.textContent = 'Connecting...';
+      }
     }
   }
 
@@ -131,22 +151,20 @@ class PopupController {
         const diagnostic = response.diagnostic;
         console.log('📊 Quick diagnostic:', diagnostic);
         
-        // Update diagnostic display
-        const diagnosticElement = document.getElementById('diagnosticInfo');
-        if (diagnosticElement) {
+        // Update quick stats
+        const quickStats = document.getElementById('quickStats');
+        if (quickStats) {
           const injectionStatus = diagnostic.injectedTabs > 0 ? '✅' : '❌';
-          diagnosticElement.innerHTML = `
-            <div style="font-size: 11px; color: #666; margin-top: 8px;">
-              Background: ✅ | Tabs: ${diagnostic.totalTabs} | Relevant: ${diagnostic.relevantTabs} | Injected: ${diagnostic.injectedTabs} ${injectionStatus}
-              <br>
-              <small>Messages: ${diagnostic.messageStats?.received || 0} received, ${diagnostic.messageStats?.errors || 0} errors</small>
+          quickStats.innerHTML = `
+            <div style="font-size: 11px; color: #9ca3af; padding: 8px; background: #1f2937; border-radius: 6px;">
+              Background: ✅ | Tabs: ${diagnostic.totalTabs} | Trading Sites: ${diagnostic.relevantTabs} | Active: ${diagnostic.injectedTabs} ${injectionStatus}
             </div>
           `;
         }
 
         // Show warnings if needed
         if (diagnostic.relevantTabs > 0 && diagnostic.injectedTabs === 0) {
-          this.showStatus('Content scripts not injected. Try refreshing trading pages.', 'warning');
+          this.showStatus('Content scripts not active. Try refreshing trading pages.', 'warning');
         } else if (diagnostic.communicationTests) {
           const failedTests = diagnostic.communicationTests.filter(test => test.status === 'failed');
           if (failedTests.length > 0) {
@@ -172,24 +190,64 @@ class PopupController {
   }
 
   setupEventListeners() {
+    // Recording button
     const recordBtn = document.getElementById('recordBtn');
     if (recordBtn) {
       recordBtn.addEventListener('click', () => this.toggleRecording());
     }
 
-    const captureBtn = document.getElementById('captureBtn');
-    if (captureBtn) {
-      captureBtn.addEventListener('click', () => this.captureScreenshot());
+    // Screenshot button
+    const screenshotBtn = document.getElementById('screenshotBtn');
+    if (screenshotBtn) {
+      screenshotBtn.addEventListener('click', () => this.captureScreenshot());
     }
 
-    const viewBtn = document.getElementById('viewBtn');
-    if (viewBtn) {
-      viewBtn.addEventListener('click', () => this.viewTrades());
+    // Auth button
+    const authBtn = document.getElementById('authBtn');
+    if (authBtn) {
+      authBtn.addEventListener('click', () => this.handleAuth());
     }
 
-    const diagnosticBtn = document.getElementById('diagnosticBtn');
-    if (diagnosticBtn) {
-      diagnosticBtn.addEventListener('click', () => this.showDetailedDiagnostic());
+    // Settings button
+    const settingsBtn = document.getElementById('settingsBtn');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', () => this.openSettings());
+    }
+
+    // Open web app button
+    const openAppBtn = document.getElementById('openAppBtn');
+    if (openAppBtn) {
+      openAppBtn.addEventListener('click', () => this.openWebApp());
+    }
+
+    // Sync button
+    const syncBtn = document.getElementById('syncBtn');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', () => this.syncData());
+    }
+
+    // Export button
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => this.exportData());
+    }
+
+    // Help button
+    const helpBtn = document.getElementById('helpBtn');
+    if (helpBtn) {
+      helpBtn.addEventListener('click', () => this.showHelp());
+    }
+
+    // Clear button
+    const clearBtn = document.getElementById('clearBtn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => this.clearData());
+    }
+
+    // Manual trade button
+    const manualTradeBtn = document.getElementById('manualTradeBtn');
+    if (manualTradeBtn) {
+      manualTradeBtn.addEventListener('click', () => this.addManualTrade());
     }
   }
 
@@ -205,7 +263,7 @@ class PopupController {
       const response = await this.sendMessageWithTimeout({
         type: 'TOGGLE_RECORDING',
         isRecording: !this.isRecording
-      }, 10000); // Longer timeout for toggle
+      }, 10000);
 
       if (response?.success) {
         this.isRecording = response.isRecording;
@@ -227,7 +285,7 @@ class PopupController {
 
   async captureScreenshot() {
     try {
-      this.setButtonLoading('captureBtn', true);
+      this.setButtonLoading('screenshotBtn', true);
       const response = await this.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
       
       if (response?.success) {
@@ -238,63 +296,94 @@ class PopupController {
     } catch (error) {
       this.handleError('Screenshot failed', error);
     } finally {
-      this.setButtonLoading('captureBtn', false);
+      this.setButtonLoading('screenshotBtn', false);
     }
   }
 
-  async viewTrades() {
+  handleAuth() {
+    this.showStatus('Authentication not implemented yet', 'info');
+  }
+
+  openSettings() {
+    chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
+  }
+
+  openWebApp() {
+    chrome.tabs.create({ url: 'https://trade-vision-vault.vercel.app' });
+  }
+
+  async syncData() {
+    this.showStatus('Sync functionality coming soon', 'info');
+  }
+
+  async exportData() {
     try {
       const response = await this.sendMessage({ type: 'GET_TRADES' });
-      if (response?.success) {
-        this.displayTrades(response.trades || []);
+      if (response?.success && response.trades) {
+        const dataStr = JSON.stringify(response.trades, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        
+        chrome.downloads.download({
+          url: url,
+          filename: `trades_export_${new Date().toISOString().split('T')[0]}.json`
+        });
+        
+        this.showStatus('Data exported successfully', 'success');
       }
     } catch (error) {
-      this.handleError('Failed to load trades', error);
+      this.handleError('Export failed', error);
     }
   }
 
-  async showDetailedDiagnostic() {
-    if (!this.backgroundConnected) {
-      alert('Background script not connected. Try reloading the extension.');
-      return;
-    }
+  showHelp() {
+    chrome.tabs.create({ url: 'https://docs.replaylocker.com' });
+  }
 
-    try {
-      const response = await this.sendMessage({ type: 'RUN_DIAGNOSTIC' });
-      if (response?.success) {
-        console.log('📊 Detailed diagnostic:', response.diagnostic);
-        this.displayDiagnostic(response.diagnostic);
+  async clearData() {
+    if (confirm('Are you sure you want to clear all trade data?')) {
+      try {
+        await chrome.storage.local.clear();
+        this.showStatus('Data cleared successfully', 'success');
+      } catch (error) {
+        this.handleError('Failed to clear data', error);
       }
-    } catch (error) {
-      this.handleError('Detailed diagnostic failed', error);
     }
+  }
+
+  addManualTrade() {
+    this.showStatus('Manual trade entry coming soon', 'info');
   }
 
   updateUI() {
+    // Update recording button
     const recordBtn = document.getElementById('recordBtn');
     if (recordBtn) {
-      recordBtn.textContent = this.isRecording ? 'Stop Recording' : 'Start Recording';
-      recordBtn.className = `btn ${this.isRecording ? 'btn-danger' : 'btn-success'}`;
+      recordBtn.textContent = this.isRecording ? 'Stop Recording' : 'Record Trade';
+      recordBtn.className = `btn ${this.isRecording ? 'btn-destructive' : 'btn-primary'}`;
       recordBtn.disabled = !this.backgroundConnected;
     }
 
-    const statusIndicator = document.getElementById('statusIndicator');
-    if (statusIndicator) {
-      const status = this.backgroundConnected ? 
-        (this.isRecording ? 'Recording' : 'Ready') : 
-        'Disconnected';
-      statusIndicator.textContent = status;
-      statusIndicator.className = `status ${
-        this.backgroundConnected ? 
-          (this.isRecording ? 'status-recording' : 'status-ready') : 
-          'status-disconnected'
-      }`;
+    // Update status dot
+    const statusDot = document.getElementById('statusDot');
+    if (statusDot) {
+      statusDot.className = `status-dot ${this.backgroundConnected ? (this.isRecording ? 'recording' : '') : 'offline'}`;
     }
 
-    const connectionStatus = document.getElementById('connectionStatus');
-    if (connectionStatus) {
-      connectionStatus.textContent = this.backgroundConnected ? 'Connected' : 'Disconnected';
-      connectionStatus.className = `connection ${this.backgroundConnected ? 'connected' : 'disconnected'}`;
+    // Update user email/status
+    const userEmail = document.getElementById('userEmail');
+    if (userEmail) {
+      if (this.backgroundConnected) {
+        userEmail.textContent = this.isRecording ? 'Recording active' : 'Ready to record';
+      } else {
+        userEmail.textContent = 'Extension offline';
+      }
+    }
+
+    // Update sync status
+    const syncStatus = document.getElementById('syncStatus');
+    if (syncStatus) {
+      syncStatus.textContent = this.backgroundConnected ? 'Ready' : 'Offline';
     }
   }
 
@@ -304,7 +393,7 @@ class PopupController {
       button.disabled = isLoading;
       if (isLoading) {
         button.dataset.originalText = button.textContent;
-        button.textContent = 'Loading...';
+        button.innerHTML = '<div class="spinner"></div>';
       } else if (button.dataset.originalText) {
         button.textContent = button.dataset.originalText;
         delete button.dataset.originalText;
@@ -313,18 +402,44 @@ class PopupController {
   }
 
   showStatus(message, type = 'info') {
-    const statusElement = document.getElementById('statusMessage');
-    if (statusElement) {
-      statusElement.textContent = message;
-      statusElement.className = `status-message ${type}`;
-      statusElement.style.display = 'block';
-      
-      // Auto-hide after delay, but keep errors visible longer
-      const hideDelay = type === 'error' ? 5000 : 3000;
-      setTimeout(() => {
-        statusElement.style.display = 'none';
-      }, hideDelay);
+    // Create status message element if it doesn't exist
+    let statusElement = document.getElementById('statusMessage');
+    if (!statusElement) {
+      statusElement = document.createElement('div');
+      statusElement.id = 'statusMessage';
+      statusElement.style.cssText = `
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        z-index: 1000;
+        display: none;
+      `;
+      document.body.appendChild(statusElement);
     }
+
+    // Set message and styling based on type
+    statusElement.textContent = message;
+    
+    const styles = {
+      success: 'background: #059669; color: white;',
+      error: 'background: #dc2626; color: white;',
+      warning: 'background: #f59e0b; color: white;',
+      info: 'background: #3b82f6; color: white;'
+    };
+    
+    statusElement.style.cssText += styles[type] || styles.info;
+    statusElement.style.display = 'block';
+    
+    // Auto-hide after delay
+    const hideDelay = type === 'error' ? 5000 : 3000;
+    setTimeout(() => {
+      statusElement.style.display = 'none';
+    }, hideDelay);
   }
 
   handleError(context, error) {
@@ -340,63 +455,14 @@ class PopupController {
     
     this.showStatus(`${context}: ${errorMessage}`, 'error');
   }
-
-  displayTrades(trades) {
-    const container = document.getElementById('tradesContainer');
-    if (!container) return;
-
-    if (trades.length === 0) {
-      container.innerHTML = '<p style="text-align: center; color: #666;">No trades captured yet</p>';
-      return;
-    }
-
-    const tradesHtml = trades.map(trade => `
-      <div style="border: 1px solid #ddd; padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 12px;">
-        <strong>${trade.instrument || 'Unknown'}</strong> - ${trade.direction || 'N/A'}<br>
-        <small>${trade.platform || 'Unknown'} | ${trade.trade_time || 'N/A'}</small>
-      </div>
-    `).join('');
-
-    container.innerHTML = tradesHtml;
-  }
-
-  displayDiagnostic(diagnostic) {
-    const container = document.getElementById('diagnosticContainer');
-    if (!container) {
-      // Fallback to alert if container not found
-      const failedComm = diagnostic.communicationTests?.filter(t => t.status === 'failed') || [];
-      alert(`Diagnostic Results:
-- Background Active: ${diagnostic.backgroundActive ? '✅' : '❌'}
-- Total Tabs: ${diagnostic.totalTabs}
-- Relevant Tabs: ${diagnostic.relevantTabs}
-- Injected Tabs: ${diagnostic.injectedTabs}
-- Pending Injections: ${diagnostic.pendingInjections || 0}
-- Communication Failures: ${failedComm.length}
-- Messages Received: ${diagnostic.messageStats?.received || 0}
-- Message Errors: ${diagnostic.messageStats?.errors || 0}`);
-      return;
-    }
-
-    const communicationStatus = diagnostic.communicationTests?.map(test => 
-      `Tab ${test.tabId}: ${test.status === 'success' ? '✅' : '❌'}`
-    ).join('<br>') || 'No tests performed';
-
-    container.innerHTML = `
-      <div style="font-size: 12px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
-        <div><strong>Background:</strong> ${diagnostic.backgroundActive ? '✅' : '❌'}</div>
-        <div><strong>Total Tabs:</strong> ${diagnostic.totalTabs}</div>
-        <div><strong>Relevant Tabs:</strong> ${diagnostic.relevantTabs}</div>
-        <div><strong>Injected Tabs:</strong> ${diagnostic.injectedTabs}</div>
-        <div><strong>Pending Injections:</strong> ${diagnostic.pendingInjections || 0}</div>
-        <div><strong>Messages:</strong> ${diagnostic.messageStats?.received || 0} received, ${diagnostic.messageStats?.errors || 0} errors</div>
-        <div style="margin-top: 8px;"><strong>Communication Tests:</strong><br>${communicationStatus}</div>
-      </div>
-    `;
-    container.style.display = 'block';
-  }
 }
 
 // Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    window.popupController = new PopupController();
+  });
+} else {
+  // DOM is already loaded
   window.popupController = new PopupController();
-});
+}
