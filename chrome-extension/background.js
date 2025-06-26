@@ -1,36 +1,29 @@
-// Enhanced background service worker with improved messaging
+
+// Simplified background service worker focused on core functionality
 class ExtensionBackground {
   constructor() {
-    this.supabaseClient = null;
-    this.activeConnections = new Set();
-    this.contentScriptPorts = new Map();
     this.injectedTabs = new Set();
     this.messageStats = { sent: 0, received: 0, errors: 0 };
-    this.pendingInjections = new Set();
     this.isReady = false;
     
-    console.log('🚀 Background Script v2.5 starting...');
+    console.log('🚀 Background Script starting...');
     this.initializeListeners();
-    this.initializeSupabase();
     
-    // Mark as ready after initialization
+    // Mark as ready after short delay
     setTimeout(() => {
       this.isReady = true;
-      console.log('✅ Background script fully ready');
-      this.injectIntoExistingTabs();
-    }, 1000);
+      console.log('✅ Background script ready');
+    }, 500);
   }
 
   initializeListeners() {
-    // Enhanced message listener with immediate response capability
+    // Core message listener
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       this.messageStats.received++;
       
       console.log('📨 Background received:', {
         type: message.type,
-        from: sender.tab?.id || 'popup',
-        url: sender.tab?.url?.substring(0, 50) + '...',
-        frameId: sender.frameId
+        from: sender.tab?.id || 'popup'
       });
 
       // Handle sync messages immediately
@@ -39,33 +32,23 @@ class ExtensionBackground {
           success: true,
           timestamp: Date.now(),
           backgroundActive: true,
-          backgroundReady: this.isReady,
-          messageStats: this.messageStats
+          ready: this.isReady
         });
         return true;
       }
 
-      if (message.type === 'CONNECTION_TEST') {
-        sendResponse({ 
-          success: true, 
-          ready: this.isReady,
-          timestamp: Date.now() 
-        });
-        return true;
-      }
-
-      // Register content script connection
+      // Register content script
       if (message.type === 'CONTENT_SCRIPT_READY') {
         const tabId = sender.tab?.id;
         if (tabId) {
           this.injectedTabs.add(tabId);
           console.log(`✅ Content script registered for tab ${tabId}`);
-          sendResponse({ success: true, registered: true, backgroundReady: this.isReady });
+          sendResponse({ success: true, registered: true });
         }
         return true;
       }
       
-      // Handle other messages
+      // Handle other messages async
       this.handleMessage(message, sender)
         .then(result => {
           this.messageStats.sent++;
@@ -80,56 +63,34 @@ class ExtensionBackground {
           });
         });
       
-      return true;
+      return true; // Keep message channel open for async response
     });
 
-    // Tab update listener with improved injection timing
+    // Tab update listener
     chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       if (changeInfo.status === 'complete' && tab.url) {
-        console.log('📄 Tab completed loading:', tab.url);
+        this.injectedTabs.delete(tabId); // Reset injection status
         
-        // Remove from injected tabs to force re-injection on reload
-        this.injectedTabs.delete(tabId);
-        
-        // Wait for page to settle before injecting
-        setTimeout(async () => {
-          await this.handleTabUpdate(tabId, tab);
-        }, 2000);
+        if (this.shouldInjectIntoUrl(tab.url)) {
+          // Wait for page to settle before injecting
+          setTimeout(() => {
+            this.ensureContentScriptInjected(tabId, tab.url);
+          }, 1000);
+        }
       }
     });
 
-    // Tab activation listener
-    chrome.tabs.onActivated.addListener(async (activeInfo) => {
-      try {
-        const tab = await chrome.tabs.get(activeInfo.tabId);
-        if (tab.url && this.shouldInjectIntoUrl(tab.url)) {
-          await this.ensureContentScriptInjected(activeInfo.tabId, tab.url);
-        }
-      } catch (error) {
-        console.log('Tab activation error:', error.message);
-      }
+    // Tab removal listener
+    chrome.tabs.onRemoved.addListener((tabId) => {
+      this.injectedTabs.delete(tabId);
+      console.log(`🗑️ Cleaned up tab ${tabId}`);
     });
 
     // Installation listener
     chrome.runtime.onInstalled.addListener(() => {
       console.log('🚀 Extension installed/updated');
       this.setupDefaultSettings();
-      setTimeout(() => this.injectIntoExistingTabs(), 3000);
     });
-
-    // Tab removal listener
-    chrome.tabs.onRemoved.addListener((tabId) => {
-      this.injectedTabs.delete(tabId);
-      this.contentScriptPorts.delete(tabId);
-      console.log(`🗑️ Cleaned up tab ${tabId}`);
-    });
-  }
-
-  async handleTabUpdate(tabId, tab) {
-    if (!this.shouldInjectIntoUrl(tab.url)) return;
-    
-    console.log(`🔄 Handling tab update for ${tabId}: ${tab.url}`);
-    await this.ensureContentScriptInjected(tabId, tab.url);
   }
 
   shouldInjectIntoUrl(url) {
@@ -137,172 +98,40 @@ class ExtensionBackground {
       'tradingview.com',
       'tradovate.com',
       'topstep.tradovate.com',
-      'trader.tradovate.com',
-      'mt4web.com',
-      'mt5web.com',
-      'fxpro.com',
-      'oanda.com'
+      'trader.tradovate.com'
     ];
 
     return supportedDomains.some(domain => url.includes(domain));
   }
 
   async ensureContentScriptInjected(tabId, url) {
-    // Wait for background to be ready
-    if (!this.isReady) {
-      console.log(`⏳ Background not ready, delaying injection for tab ${tabId}`);
-      setTimeout(() => this.ensureContentScriptInjected(tabId, url), 1000);
-      return;
-    }
-
-    // Prevent multiple simultaneous injections
-    if (this.pendingInjections.has(tabId)) {
-      console.log(`⏳ Injection already pending for tab ${tabId}`);
-      return;
-    }
-
     if (this.injectedTabs.has(tabId)) {
-      console.log(`ℹ️ Content script already injected in tab ${tabId}`);
       return;
     }
-
-    this.pendingInjections.add(tabId);
 
     try {
-      console.log(`🔍 Injecting content script into tab ${tabId}: ${url}`);
+      console.log(`🔍 Injecting content script into tab ${tabId}`);
       
-      // Determine which script to inject based on URL
+      // Determine which script to inject
       let scriptFile;
       if (url.includes('tradingview.com')) {
         scriptFile = 'content-tradingview.js';
       } else if (url.includes('tradovate.com')) {
         scriptFile = 'content-tradovate.js';
       } else {
-        scriptFile = 'content-mt4.js';
+        return;
       }
       
-      // Test if we can execute scripts on this tab
-      try {
-        const testResult = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: () => {
-            return { 
-              ready: true, 
-              url: window.location.href,
-              origin: window.location.origin,
-              hasListener: !!window.replayLockerInjected,
-              timestamp: Date.now()
-            };
-          }
-        });
-        
-        console.log('🧪 Tab test result:', testResult[0]?.result);
-        
-        // Only inject if not already injected
-        if (!testResult[0]?.result?.hasListener) {
-          // Inject the content script
-          await chrome.scripting.executeScript({
-            target: { tabId },
-            files: [scriptFile]
-          });
-          
-          console.log(`✅ ${scriptFile} injected successfully into tab ${tabId}`);
-          
-          // Wait longer for content script to fully initialize
-          setTimeout(async () => {
-            if (this.injectedTabs.has(tabId)) {
-              // Send initial recording status with retry logic
-              const isRecording = await this.getRecordingStatus();
-              await this.sendMessageToTabWithRetry(tabId, {
-                type: 'RECORDING_STATUS_UPDATE',
-                isRecording: isRecording
-              });
-            }
-          }, 2000);
-        } else {
-          console.log(`ℹ️ Content script already present in tab ${tabId}`);
-          this.injectedTabs.add(tabId);
-        }
-      } catch (scriptError) {
-        console.error(`❌ Script execution failed for tab ${tabId}:`, scriptError.message);
-        throw scriptError;
-      }
+      // Inject the content script
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: [scriptFile]
+      });
+      
+      console.log(`✅ ${scriptFile} injected into tab ${tabId}`);
       
     } catch (error) {
       console.error(`❌ Injection failed for tab ${tabId}:`, error.message);
-    } finally {
-      this.pendingInjections.delete(tabId);
-    }
-  }
-
-  async sendMessageToTabWithRetry(tabId, message, maxRetries = 3) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await chrome.tabs.sendMessage(tabId, message);
-        console.log(`📤 Message sent to tab ${tabId} (attempt ${attempt}):`, message.type);
-        return true;
-      } catch (error) {
-        console.log(`❌ Message attempt ${attempt} failed for tab ${tabId}:`, error.message);
-        
-        if (attempt === maxRetries) {
-          // Remove from injected tabs if all attempts fail
-          this.injectedTabs.delete(tabId);
-          console.error(`❌ All message attempts failed for tab ${tabId}`);
-          return false;
-        }
-        
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-      }
-    }
-    return false;
-  }
-
-  async injectIntoExistingTabs() {
-    try {
-      const tabs = await chrome.tabs.query({});
-      console.log(`🔍 Checking ${tabs.length} existing tabs...`);
-      
-      for (const tab of tabs) {
-        if (tab.url && this.shouldInjectIntoUrl(tab.url)) {
-          // Add delay between injections to avoid overwhelming
-          setTimeout(() => {
-            this.ensureContentScriptInjected(tab.id, tab.url);
-          }, Math.random() * 2000);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Failed to inject into existing tabs:', error);
-    }
-  }
-
-  async sendMessageToTab(tabId, message) {
-    // Check if tab has active content script
-    if (!this.injectedTabs.has(tabId)) {
-      console.log(`⚠️ No active content script in tab ${tabId}, attempting injection...`);
-      const tab = await chrome.tabs.get(tabId);
-      await this.ensureContentScriptInjected(tabId, tab.url);
-      
-      // Wait for injection to complete
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    try {
-      await chrome.tabs.sendMessage(tabId, message);
-      console.log(`📤 Message sent to tab ${tabId}:`, message.type);
-    } catch (error) {
-      console.log(`❌ Failed to send message to tab ${tabId}:`, error.message);
-      
-      // Remove from injected tabs if communication fails
-      this.injectedTabs.delete(tabId);
-      
-      // Try to re-inject
-      try {
-        const tab = await chrome.tabs.get(tabId);
-        await this.ensureContentScriptInjected(tabId, tab.url);
-      } catch (reinjectionError) {
-        console.error(`❌ Re-injection failed for tab ${tabId}:`, reinjectionError.message);
-      }
     }
   }
 
@@ -328,9 +157,6 @@ class ExtensionBackground {
       case 'GET_TRADES':
         const trades = await this.getStoredTrades();
         return { success: true, trades };
-
-      case 'RUN_DIAGNOSTIC':
-        return await this.runDiagnostic();
 
       default:
         console.warn('⚠️ Unknown message type:', message.type);
@@ -368,14 +194,19 @@ class ExtensionBackground {
     
     console.log('🔄 Recording toggled to:', newStatus);
     
-    // Notify all relevant tabs
+    // Notify relevant tabs
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
-      if (this.shouldInjectIntoUrl(tab.url || '')) {
-        this.sendMessageToTab(tab.id, {
-          type: 'RECORDING_STATUS_UPDATE',
-          isRecording: newStatus
-        });
+      if (this.shouldInjectIntoUrl(tab.url || '') && this.injectedTabs.has(tab.id)) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, {
+            type: 'RECORDING_STATUS_UPDATE',
+            isRecording: newStatus
+          });
+        } catch (error) {
+          console.log(`Failed to notify tab ${tab.id}:`, error.message);
+          this.injectedTabs.delete(tab.id);
+        }
       }
     }
     
@@ -399,43 +230,6 @@ class ExtensionBackground {
     }
   }
 
-  async runDiagnostic() {
-    const tabs = await chrome.tabs.query({});
-    const relevantTabs = tabs.filter(tab => this.shouldInjectIntoUrl(tab.url || ''));
-    
-    // Test communication with each injected tab
-    const communicationTests = [];
-    for (const tabId of this.injectedTabs) {
-      try {
-        await chrome.tabs.sendMessage(tabId, { type: 'DIAGNOSTIC_PING' });
-        communicationTests.push({ tabId, status: 'success' });
-      } catch (error) {
-        communicationTests.push({ tabId, status: 'failed', error: error.message });
-      }
-    }
-    
-    return {
-      success: true,
-      diagnostic: {
-        backgroundActive: true,
-        timestamp: Date.now(),
-        messageStats: this.messageStats,
-        totalTabs: tabs.length,
-        relevantTabs: relevantTabs.length,
-        injectedTabs: this.injectedTabs.size,
-        pendingInjections: this.pendingInjections.size,
-        communicationTests,
-        relevantTabDetails: relevantTabs.map(tab => ({
-          id: tab.id,
-          url: tab.url,
-          title: tab.title,
-          injected: this.injectedTabs.has(tab.id),
-          pending: this.pendingInjections.has(tab.id)
-        }))
-      }
-    };
-  }
-
   async getStoredTrades() {
     const result = await chrome.storage.local.get('trades');
     return result.trades || [];
@@ -449,19 +243,11 @@ class ExtensionBackground {
   async setupDefaultSettings() {
     await chrome.storage.local.set({
       isRecording: false,
-      trades: [],
-      screenshots: []
+      trades: []
     });
-  }
-
-  async initializeSupabase() {
-    this.supabaseClient = {
-      url: 'https://akhcugmczkfxrhzuadlo.supabase.co',
-      key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFraGN1Z21jemtmeHJoenVhZGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4MDM3MTMsImV4cCI6MjA2NjM3OTcxM30.G93cLEdFV4yngYmr7KbDG2IP9Z2WuGBS_Ug3AVXdrt4'
-    };
   }
 }
 
 // Initialize background script
-console.log('🚀 Initializing Background Script v2.5');
+console.log('🚀 Initializing Background Script');
 const backgroundInstance = new ExtensionBackground();

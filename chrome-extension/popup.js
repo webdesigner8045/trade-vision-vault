@@ -16,17 +16,16 @@ class PopupController {
       this.setupEventListeners();
       this.showLoadingState();
       
-      // Test background connection
+      // Test background connection with shorter timeout
       await this.testBackgroundConnection();
       
-      // Load recording status
-      await this.loadRecordingStatus();
+      // Load recording status only if connected
+      if (this.backgroundConnected) {
+        await this.loadRecordingStatus();
+      }
       
       // Update UI
       this.updateUI();
-      
-      // Run diagnostic
-      await this.runQuickDiagnostic();
       
       console.log('✅ Popup initialized successfully');
     } catch (error) {
@@ -50,7 +49,12 @@ class PopupController {
 
   async testBackgroundConnection() {
     try {
-      const response = await this.sendMessage({ type: 'PING' });
+      // First check if runtime is available
+      if (!chrome?.runtime?.id) {
+        throw new Error('Chrome runtime not available');
+      }
+
+      const response = await this.sendMessage({ type: 'PING' }, 3000);
       if (response?.success) {
         this.backgroundConnected = true;
         this.connectionStatus = 'connected';
@@ -62,12 +66,24 @@ class PopupController {
       this.backgroundConnected = false;
       this.connectionStatus = 'disconnected';
       console.error('❌ Background connection failed:', error);
-      throw error;
+      
+      // Try to show helpful error message
+      if (error.message.includes('Receiving end does not exist')) {
+        this.showStatus('Background script not responding. Try reloading the extension.', 'error');
+      } else {
+        this.showStatus('Extension connection failed', 'error');
+      }
     }
   }
 
-  sendMessage(message, timeout = 5000) {
+  sendMessage(message, timeout = 3000) {
     return new Promise((resolve, reject) => {
+      // Check if chrome runtime is available
+      if (!chrome?.runtime?.sendMessage) {
+        reject(new Error('Chrome runtime.sendMessage not available'));
+        return;
+      }
+
       const timeoutId = setTimeout(() => {
         reject(new Error(`Message timeout after ${timeout}ms`));
       }, timeout);
@@ -77,9 +93,7 @@ class PopupController {
           clearTimeout(timeoutId);
           
           if (chrome.runtime.lastError) {
-            reject(new Error(`Chrome runtime error: ${chrome.runtime.lastError.message}`));
-          } else if (response?.error) {
-            reject(new Error(`Background error: ${response.error}`));
+            reject(new Error(chrome.runtime.lastError.message));
           } else {
             resolve(response);
           }
@@ -91,41 +105,12 @@ class PopupController {
     });
   }
 
-  async runQuickDiagnostic() {
+  async loadRecordingStatus() {
     if (!this.backgroundConnected) {
-      this.showStatus('Background script not connected', 'error');
+      this.isRecording = false;
       return;
     }
 
-    try {
-      const response = await this.sendMessage({ type: 'RUN_DIAGNOSTIC' });
-      if (response?.success) {
-        const diagnostic = response.diagnostic;
-        console.log('📊 Quick diagnostic:', diagnostic);
-        
-        // Update quick stats
-        const quickStats = document.getElementById('quickStats');
-        if (quickStats) {
-          const injectionStatus = diagnostic.injectedTabs > 0 ? '✅' : '❌';
-          quickStats.innerHTML = `
-            <div style="font-size: 11px; color: #9ca3af; padding: 8px; background: #1f2937; border-radius: 6px;">
-              Background: ✅ | Tabs: ${diagnostic.totalTabs} | Trading Sites: ${diagnostic.relevantTabs} | Active: ${diagnostic.injectedTabs} ${injectionStatus}
-            </div>
-          `;
-        }
-
-        // Show warnings if needed
-        if (diagnostic.relevantTabs > 0 && diagnostic.injectedTabs === 0) {
-          this.showStatus('Content scripts not active. Try refreshing trading pages.', 'warning');
-        }
-      }
-    } catch (error) {
-      console.log('❌ Diagnostic failed:', error);
-      this.showStatus('Diagnostic failed - background script issue', 'error');
-    }
-  }
-
-  async loadRecordingStatus() {
     try {
       const response = await this.sendMessage({ type: 'GET_RECORDING_STATUS' });
       this.isRecording = response?.isRecording || false;
@@ -149,12 +134,6 @@ class PopupController {
       screenshotBtn.addEventListener('click', () => this.captureScreenshot());
     }
 
-    // Auth button
-    const authBtn = document.getElementById('authBtn');
-    if (authBtn) {
-      authBtn.addEventListener('click', () => this.handleAuth());
-    }
-
     // Settings button
     const settingsBtn = document.getElementById('settingsBtn');
     if (settingsBtn) {
@@ -165,12 +144,6 @@ class PopupController {
     const openAppBtn = document.getElementById('openAppBtn');
     if (openAppBtn) {
       openAppBtn.addEventListener('click', () => this.openWebApp());
-    }
-
-    // Sync button
-    const syncBtn = document.getElementById('syncBtn');
-    if (syncBtn) {
-      syncBtn.addEventListener('click', () => this.syncData());
     }
 
     // Export button
@@ -190,17 +163,11 @@ class PopupController {
     if (clearBtn) {
       clearBtn.addEventListener('click', () => this.clearData());
     }
-
-    // Manual trade button
-    const manualTradeBtn = document.getElementById('manualTradeBtn');
-    if (manualTradeBtn) {
-      manualTradeBtn.addEventListener('click', () => this.addManualTrade());
-    }
   }
 
   async toggleRecording() {
     if (!this.backgroundConnected) {
-      this.handleError('Cannot toggle recording', new Error('Background script not connected'));
+      this.showStatus('Background script not connected', 'error');
       return;
     }
 
@@ -216,11 +183,8 @@ class PopupController {
         this.isRecording = response.isRecording;
         this.updateUI();
         this.showStatus(`Recording ${this.isRecording ? 'started' : 'stopped'}`, 'success');
-        
-        // Re-run diagnostic to check content script status
-        setTimeout(() => this.runQuickDiagnostic(), 1000);
       } else {
-        throw new Error('Toggle recording failed - invalid response');
+        throw new Error('Toggle recording failed');
       }
     } catch (error) {
       console.error('❌ Toggle error:', error);
@@ -231,6 +195,11 @@ class PopupController {
   }
 
   async captureScreenshot() {
+    if (!this.backgroundConnected) {
+      this.showStatus('Background script not connected', 'error');
+      return;
+    }
+
     try {
       this.setButtonLoading('screenshotBtn', true);
       const response = await this.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
@@ -247,23 +216,24 @@ class PopupController {
     }
   }
 
-  handleAuth() {
-    this.showStatus('Authentication not implemented yet', 'info');
-  }
-
   openSettings() {
-    chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
+    if (chrome?.tabs?.create) {
+      chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
+    }
   }
 
   openWebApp() {
-    chrome.tabs.create({ url: 'https://trade-vision-vault.vercel.app' });
-  }
-
-  async syncData() {
-    this.showStatus('Sync functionality coming soon', 'info');
+    if (chrome?.tabs?.create) {
+      chrome.tabs.create({ url: 'https://trade-vision-vault.vercel.app' });
+    }
   }
 
   async exportData() {
+    if (!this.backgroundConnected) {
+      this.showStatus('Background script not connected', 'error');
+      return;
+    }
+
     try {
       const response = await this.sendMessage({ type: 'GET_TRADES' });
       if (response?.success && response.trades) {
@@ -271,10 +241,12 @@ class PopupController {
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(dataBlob);
         
-        chrome.downloads.download({
-          url: url,
-          filename: `trades_export_${new Date().toISOString().split('T')[0]}.json`
-        });
+        if (chrome?.downloads?.download) {
+          chrome.downloads.download({
+            url: url,
+            filename: `trades_export_${new Date().toISOString().split('T')[0]}.json`
+          });
+        }
         
         this.showStatus('Data exported successfully', 'success');
       }
@@ -284,22 +256,22 @@ class PopupController {
   }
 
   showHelp() {
-    chrome.tabs.create({ url: 'https://docs.replaylocker.com' });
+    if (chrome?.tabs?.create) {
+      chrome.tabs.create({ url: 'https://docs.replaylocker.com' });
+    }
   }
 
   async clearData() {
     if (confirm('Are you sure you want to clear all trade data?')) {
       try {
-        await chrome.storage.local.clear();
-        this.showStatus('Data cleared successfully', 'success');
+        if (chrome?.storage?.local) {
+          await chrome.storage.local.clear();
+          this.showStatus('Data cleared successfully', 'success');
+        }
       } catch (error) {
         this.handleError('Failed to clear data', error);
       }
     }
-  }
-
-  addManualTrade() {
-    this.showStatus('Manual trade entry coming soon', 'info');
   }
 
   updateUI() {
@@ -325,6 +297,17 @@ class PopupController {
       } else {
         userEmail.textContent = 'Extension offline';
       }
+    }
+
+    // Update quick stats
+    const quickStats = document.getElementById('quickStats');
+    if (quickStats) {
+      const status = this.backgroundConnected ? '✅' : '❌';
+      quickStats.innerHTML = `
+        <div style="font-size: 11px; color: #9ca3af; padding: 8px; background: #1f2937; border-radius: 6px;">
+          Background: ${status} | Status: ${this.connectionStatus}
+        </div>
+      `;
     }
 
     // Update sync status
@@ -394,23 +377,25 @@ class PopupController {
     let errorMessage = error.message;
     
     // Provide more helpful error messages
-    if (errorMessage.includes('timeout')) {
+    if (errorMessage.includes('Receiving end does not exist')) {
       errorMessage = 'Background script not responding. Try reloading the extension.';
+    } else if (errorMessage.includes('timeout')) {
+      errorMessage = 'Background script not responding. Check if extension is enabled.';
     } else if (errorMessage.includes('runtime error')) {
-      errorMessage = 'Extension communication error. Check if extension is enabled.';
+      errorMessage = 'Extension communication error. Try reloading the extension.';
     }
     
     this.showStatus(`${context}: ${errorMessage}`, 'error');
   }
 }
 
-// Initialize when DOM is ready
+// Initialize popup with proper error handling
 function initializePopup() {
   try {
     console.log('🚀 Starting popup initialization...');
     
     // Check if chrome.runtime is available
-    if (!chrome || !chrome.runtime) {
+    if (!chrome?.runtime) {
       throw new Error('Chrome runtime not available');
     }
     
