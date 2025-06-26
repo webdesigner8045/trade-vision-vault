@@ -191,65 +191,106 @@ class ExtensionBackground {
   async handleTradeDetection(tradeData, tab) {
     console.log('📈 Trade detected:', tradeData);
     
-    const trades = await this.getStoredTrades();
-    const newTrade = {
-      id: tradeData.id || Date.now().toString(),
-      timestamp: new Date().toISOString(),
-      url: tab?.url || 'unknown',
-      tab_title: tab?.title || 'unknown',
-      ...tradeData
-    };
-    
-    trades.push(newTrade);
-    await chrome.storage.local.set({ trades });
+    try {
+      const trades = await this.getStoredTrades();
+      const newTrade = {
+        id: tradeData.id || Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        url: tab?.url || 'unknown',
+        tab_title: tab?.title || 'unknown',
+        ...tradeData
+      };
+      
+      trades.push(newTrade);
+      await chrome.storage.local.set({ trades });
 
-    // Show notification
-    chrome.action.setBadgeText({ text: '!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-    setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000);
+      // Show notification
+      chrome.action.setBadgeText({ text: trades.length.toString() });
+      chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
 
-    console.log('✅ Trade captured:', newTrade);
-    return { success: true, trade: newTrade };
+      // Clear badge after 10 seconds
+      setTimeout(() => {
+        chrome.action.setBadgeText({ text: '' });
+      }, 10000);
+
+      console.log('✅ Trade captured and stored:', newTrade);
+      
+      // Notify popup if it's open
+      try {
+        chrome.runtime.sendMessage({
+          type: 'TRADE_UPDATED',
+          trade: newTrade,
+          totalTrades: trades.length
+        });
+      } catch (error) {
+        // Popup might not be open, that's okay
+        console.log('Popup not available for notification');
+      }
+
+      return { success: true, trade: newTrade };
+    } catch (error) {
+      console.error('❌ Error handling trade detection:', error);
+      throw error;
+    }
   }
 
   async toggleRecording(isRecording) {
-    const newStatus = isRecording !== undefined ? isRecording : !(await this.getRecordingStatus());
-    await chrome.storage.local.set({ isRecording: newStatus });
-    
-    console.log('🔄 Recording toggled to:', newStatus);
-    
-    // Notify relevant tabs
-    const tabs = await chrome.tabs.query({});
-    for (const tab of tabs) {
-      if (this.shouldInjectIntoUrl(tab.url || '') && this.injectedTabs.has(tab.id)) {
-        try {
-          await chrome.tabs.sendMessage(tab.id, {
-            type: 'RECORDING_STATUS_UPDATE',
-            isRecording: newStatus
-          });
-        } catch (error) {
-          console.log(`Failed to notify tab ${tab.id}:`, error.message);
-          this.injectedTabs.delete(tab.id);
+    try {
+      const newStatus = isRecording !== undefined ? isRecording : !(await this.getRecordingStatus());
+      await chrome.storage.local.set({ isRecording: newStatus });
+      
+      console.log('🔄 Recording toggled to:', newStatus);
+      
+      // Update badge
+      if (newStatus) {
+        chrome.action.setBadgeText({ text: 'REC' });
+        chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+      } else {
+        chrome.action.setBadgeText({ text: '' });
+      }
+      
+      // Notify relevant tabs
+      const tabs = await chrome.tabs.query({});
+      for (const tab of tabs) {
+        if (this.shouldInjectIntoUrl(tab.url || '') && this.injectedTabs.has(tab.id)) {
+          try {
+            await chrome.tabs.sendMessage(tab.id, {
+              type: 'RECORDING_STATUS_UPDATE',
+              isRecording: newStatus
+            });
+            console.log(`✅ Notified tab ${tab.id} of recording status`);
+          } catch (error) {
+            console.log(`Failed to notify tab ${tab.id}:`, error.message);
+            this.injectedTabs.delete(tab.id);
+          }
         }
       }
+      
+      return newStatus;
+    } catch (error) {
+      console.error('❌ Error toggling recording:', error);
+      throw error;
     }
-    
-    return newStatus;
   }
 
   async captureScreenshot(tabId) {
     if (!tabId) {
       console.error('❌ No tab ID provided for screenshot');
-      return null;
+      throw new Error('No tab ID provided');
     }
 
     try {
-      // Validate chrome APIs are available
       if (!chrome?.tabs?.captureVisibleTab) {
         throw new Error('Screenshot API not available');
       }
 
       console.log(`📸 Capturing screenshot for tab ${tabId}`);
+      
+      // Make sure the tab is active and visible
+      await chrome.tabs.update(tabId, { active: true });
+      
+      // Wait a moment for tab to become active
+      await new Promise(resolve => setTimeout(resolve, 100));
       
       const dataUrl = await chrome.tabs.captureVisibleTab({
         format: 'png',
@@ -260,12 +301,23 @@ class ExtensionBackground {
         throw new Error('Screenshot capture returned empty result');
       }
       
-      console.log('✅ Screenshot captured successfully');
+      // Store the screenshot
+      const screenshots = await this.getStoredScreenshots();
+      const newScreenshot = {
+        id: `screenshot-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        dataUrl: dataUrl,
+        tabId: tabId
+      };
+      
+      screenshots.push(newScreenshot);
+      await chrome.storage.local.set({ screenshots });
+      
+      console.log('✅ Screenshot captured and stored successfully');
       return dataUrl;
     } catch (error) {
       console.error('❌ Screenshot failed:', error);
       
-      // Provide more specific error messages
       if (error.message.includes('Cannot access')) {
         throw new Error('Cannot capture screenshot - tab may not be visible or accessible');
       } else if (error.message.includes('not available')) {
@@ -277,20 +329,46 @@ class ExtensionBackground {
   }
 
   async getStoredTrades() {
-    const result = await chrome.storage.local.get('trades');
-    return result.trades || [];
+    try {
+      const result = await chrome.storage.local.get('trades');
+      return result.trades || [];
+    } catch (error) {
+      console.error('❌ Error getting stored trades:', error);
+      return [];
+    }
+  }
+
+  async getStoredScreenshots() {
+    try {
+      const result = await chrome.storage.local.get('screenshots');
+      return result.screenshots || [];
+    } catch (error) {
+      console.error('❌ Error getting stored screenshots:', error);
+      return [];
+    }
   }
 
   async getRecordingStatus() {
-    const result = await chrome.storage.local.get('isRecording');
-    return result.isRecording || false;
+    try {
+      const result = await chrome.storage.local.get('isRecording');
+      return result.isRecording || false;
+    } catch (error) {
+      console.error('❌ Error getting recording status:', error);
+      return false;
+    }
   }
 
   async setupDefaultSettings() {
-    await chrome.storage.local.set({
-      isRecording: false,
-      trades: []
-    });
+    try {
+      await chrome.storage.local.set({
+        isRecording: false,
+        trades: [],
+        screenshots: []
+      });
+      console.log('✅ Default settings initialized');
+    } catch (error) {
+      console.error('❌ Error setting up default settings:', error);
+    }
   }
 }
 

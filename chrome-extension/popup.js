@@ -1,9 +1,11 @@
+
 class PopupController {
   constructor() {
     this.isRecording = false;
     this.connectionStatus = 'disconnected';
     this.backgroundConnected = false;
     this.contextInvalidated = false;
+    this.trades = [];
     
     this.init();
   }
@@ -12,7 +14,6 @@ class PopupController {
     console.log('📱 Initializing popup...');
     
     try {
-      // Check if extension context is valid
       if (!this.isExtensionContextValid()) {
         this.handleContextInvalidation();
         return;
@@ -25,6 +26,7 @@ class PopupController {
       
       if (this.backgroundConnected) {
         await this.loadRecordingStatus();
+        await this.loadTrades();
       }
       
       this.updateUI();
@@ -38,7 +40,6 @@ class PopupController {
 
   isExtensionContextValid() {
     try {
-      // Test if chrome.runtime is accessible
       return !!(chrome?.runtime?.id && chrome?.runtime?.sendMessage);
     } catch (error) {
       console.error('Extension context check failed:', error);
@@ -93,7 +94,6 @@ class PopupController {
         retryCount++;
         console.warn(`❌ Connection attempt ${retryCount} failed:`, error.message);
         
-        // Check for context invalidation
         if (error.message.includes('Extension context invalidated') || 
             error.message.includes('Receiving end does not exist')) {
           this.handleContextInvalidation();
@@ -151,7 +151,6 @@ class PopupController {
             const errorMessage = chrome.runtime.lastError.message;
             console.error('❌ Runtime error:', errorMessage);
             
-            // Check for context invalidation
             if (errorMessage.includes('Extension context invalidated') ||
                 errorMessage.includes('Receiving end does not exist')) {
               this.handleContextInvalidation();
@@ -192,6 +191,21 @@ class PopupController {
     }
   }
 
+  async loadTrades() {
+    if (!this.backgroundConnected) return;
+
+    try {
+      const response = await this.sendMessage({ type: 'GET_TRADES' });
+      if (response?.success) {
+        this.trades = response.trades || [];
+        console.log('📊 Trades loaded:', this.trades.length);
+      }
+    } catch (error) {
+      console.error('❌ Failed to load trades:', error);
+      this.trades = [];
+    }
+  }
+
   setupEventListeners() {
     const recordBtn = document.getElementById('recordBtn');
     if (recordBtn) {
@@ -203,9 +217,24 @@ class PopupController {
       screenshotBtn.addEventListener('click', () => this.captureScreenshot());
     }
 
+    const manualTradeBtn = document.getElementById('manualTradeBtn');
+    if (manualTradeBtn) {
+      manualTradeBtn.addEventListener('click', () => this.addManualTrade());
+    }
+
     const settingsBtn = document.getElementById('settingsBtn');
     if (settingsBtn) {
       settingsBtn.addEventListener('click', () => this.openSettings());
+    }
+
+    const authBtn = document.getElementById('authBtn');
+    if (authBtn) {
+      authBtn.addEventListener('click', () => this.handleAuth());
+    }
+
+    const syncBtn = document.getElementById('syncBtn');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', () => this.syncTrades());
     }
 
     const openAppBtn = document.getElementById('openAppBtn');
@@ -252,6 +281,9 @@ class PopupController {
         this.isRecording = response.isRecording;
         this.updateUI();
         this.showStatus(`Recording ${this.isRecording ? 'started' : 'stopped'}`, 'success');
+        
+        // Reload trades after toggling recording
+        await this.loadTrades();
       } else {
         throw new Error('Toggle recording failed');
       }
@@ -284,9 +316,9 @@ class PopupController {
       const response = await this.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
       
       if (response?.success) {
-        this.showStatus('Screenshot captured!', 'success');
+        this.showStatus('Screenshot captured successfully!', 'success');
       } else {
-        throw new Error('Capture failed');
+        throw new Error(response?.error || 'Capture failed');
       }
     } catch (error) {
       console.error('❌ Screenshot error:', error);
@@ -298,6 +330,67 @@ class PopupController {
       }
     } finally {
       this.setButtonLoading('screenshotBtn', false);
+    }
+  }
+
+  async addManualTrade() {
+    if (!this.backgroundConnected) {
+      this.showStatus('Background script not connected', 'error');
+      return;
+    }
+
+    try {
+      // Simple manual trade entry
+      const tradeData = {
+        id: `manual-${Date.now()}`,
+        platform: 'Manual',
+        direction: 'BUY', // Default, user can modify later
+        trade_date: new Date().toISOString().split('T')[0],
+        trade_time: new Date().toTimeString().split(' ')[0],
+        trigger: 'manual_entry',
+        page_url: 'manual',
+        timestamp: new Date().toISOString(),
+        notes: 'Manual trade entry'
+      };
+
+      const response = await this.sendMessage({
+        type: 'TRADE_DETECTED',
+        data: tradeData
+      });
+
+      if (response?.success) {
+        this.showStatus('Manual trade added successfully!', 'success');
+        await this.loadTrades();
+      } else {
+        throw new Error('Failed to add manual trade');
+      }
+    } catch (error) {
+      this.handleError('Failed to add manual trade', error);
+    }
+  }
+
+  handleAuth() {
+    // For now, just show that auth is not implemented
+    this.showStatus('Authentication feature coming soon', 'info');
+  }
+
+  async syncTrades() {
+    if (!this.backgroundConnected) {
+      this.showStatus('Background script not connected', 'error');
+      return;
+    }
+
+    try {
+      this.setButtonLoading('syncBtn', true);
+      
+      // For now, just reload trades
+      await this.loadTrades();
+      this.showStatus('Trades synced successfully!', 'success');
+      
+    } catch (error) {
+      this.handleError('Sync failed', error);
+    } finally {
+      this.setButtonLoading('syncBtn', false);
     }
   }
 
@@ -351,6 +444,8 @@ class PopupController {
       try {
         if (chrome?.storage?.local) {
           await chrome.storage.local.clear();
+          this.trades = [];
+          this.updateUI();
           this.showStatus('Data cleared successfully', 'success');
         }
       } catch (error) {
@@ -362,18 +457,21 @@ class PopupController {
   updateUI() {
     if (this.contextInvalidated) return;
     
+    // Update recording button
     const recordBtn = document.getElementById('recordBtn');
     if (recordBtn) {
-      recordBtn.textContent = this.isRecording ? 'Stop Recording' : 'Record Trade';
+      recordBtn.textContent = this.isRecording ? 'Stop Recording' : 'Start Recording';
       recordBtn.className = `btn ${this.isRecording ? 'btn-destructive' : 'btn-primary'}`;
       recordBtn.disabled = !this.backgroundConnected;
     }
 
+    // Update status dot
     const statusDot = document.getElementById('statusDot');
     if (statusDot) {
       statusDot.className = `status-dot ${this.backgroundConnected ? (this.isRecording ? 'recording' : '') : 'offline'}`;
     }
 
+    // Update user email/status
     const userEmail = document.getElementById('userEmail');
     if (userEmail) {
       if (this.backgroundConnected) {
@@ -383,19 +481,62 @@ class PopupController {
       }
     }
 
+    // Update quick stats
     const quickStats = document.getElementById('quickStats');
     if (quickStats) {
       const status = this.backgroundConnected ? '✅' : '❌';
       quickStats.innerHTML = `
         <div style="font-size: 11px; color: #9ca3af; padding: 8px; background: #1f2937; border-radius: 6px;">
-          Background: ${status} | Status: ${this.connectionStatus}
+          Background: ${status} | Status: ${this.connectionStatus} | Trades: ${this.trades.length}
         </div>
       `;
     }
 
+    // Update sync status
     const syncStatus = document.getElementById('syncStatus');
     if (syncStatus) {
       syncStatus.textContent = this.backgroundConnected ? 'Ready' : 'Offline';
+    }
+
+    // Update trade count
+    const tradeCount = document.getElementById('tradeCount');
+    if (tradeCount) {
+      tradeCount.textContent = this.trades.length.toString();
+    }
+
+    // Update trades list
+    this.updateTradesList();
+  }
+
+  updateTradesList() {
+    const tradesList = document.getElementById('tradesList');
+    if (!tradesList) return;
+
+    if (this.trades.length === 0) {
+      tradesList.innerHTML = `
+        <div class="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M3 3v18h18" stroke="currentColor" stroke-width="2"/>
+            <path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3" stroke="currentColor" stroke-width="2"/>
+          </svg>
+          <p>No trades captured yet</p>
+          <small>${this.isRecording ? 'Place a trade to see it here' : 'Start recording to capture trades'}</small>
+        </div>
+      `;
+    } else {
+      const recentTrades = this.trades.slice(0, 5); // Show last 5 trades
+      tradesList.innerHTML = recentTrades.map(trade => `
+        <div class="trade-item synced">
+          <div class="trade-header">
+            <span class="trade-symbol">${trade.platform || 'Unknown'}</span>
+            <span class="trade-time">${trade.trade_time || 'Unknown'}</span>
+          </div>
+          <div class="trade-details">
+            Direction: ${trade.direction || 'Unknown'} | ${trade.trade_date || 'Unknown'}
+          </div>
+          <div class="trade-platform">${trade.trigger || 'Unknown trigger'}</div>
+        </div>
+      `).join('');
     }
   }
 

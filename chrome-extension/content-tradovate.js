@@ -1,4 +1,4 @@
-// Simplified Tradovate content script
+
 (function() {
   'use strict';
 
@@ -16,6 +16,7 @@
       this.isRecording = false;
       this.platform = 'Tradovate';
       this.messageListenerActive = false;
+      this.lastTradeTime = 0;
       this.init();
     }
 
@@ -37,7 +38,6 @@
         return;
       }
 
-      // CRITICAL: Ensure this listener stays active
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log('📨 Content script received message:', message.type);
         
@@ -50,7 +50,6 @@
             return true;
           }
           
-          // Handle other message types
           sendResponse({ success: false, error: 'Unknown message type' });
           return true;
           
@@ -134,7 +133,6 @@
     }
 
     createRecordingIndicator() {
-      // Remove existing indicator if present
       const existing = document.getElementById('tradovate-recording-indicator');
       if (existing) {
         existing.remove();
@@ -165,7 +163,6 @@
       indicator.addEventListener('click', () => this.toggleRecording());
       document.body.appendChild(indicator);
       
-      // Add pulse animation CSS if not exists
       if (!document.getElementById('tradovate-styles')) {
         const style = document.createElement('style');
         style.id = 'tradovate-styles';
@@ -187,8 +184,9 @@
     }
 
     setupTradeDetection() {
-      console.log('🎯 Setting up trade detection...');
+      console.log('🎯 Setting up enhanced trade detection...');
       
+      // Method 1: Click detection
       document.addEventListener('click', (event) => {
         if (!this.isRecording) return;
         
@@ -202,23 +200,67 @@
           }, 100);
         }
       }, true);
+
+      // Method 2: DOM changes detection (for programmatic trades)
+      const observer = new MutationObserver((mutations) => {
+        if (!this.isRecording) return;
+        
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'childList') {
+            mutation.addedNodes.forEach((node) => {
+              if (node.nodeType === Node.ELEMENT_NODE) {
+                this.checkForTradeElements(node);
+              }
+            });
+          }
+        });
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      // Method 3: Keyboard detection (Enter key on trade forms)
+      document.addEventListener('keydown', (event) => {
+        if (!this.isRecording) return;
+        
+        if (event.key === 'Enter') {
+          const activeElement = document.activeElement;
+          if (this.isTradeInputElement(activeElement)) {
+            console.log('🎯 Enter pressed on trade form');
+            setTimeout(() => {
+              this.captureKeyboardTrade(activeElement);
+            }, 200);
+          }
+        }
+      });
       
-      console.log('✅ Trade detection setup complete');
+      console.log('✅ Enhanced trade detection setup complete');
     }
 
     findTradeButton(element) {
       for (let current = element; current && current !== document; current = current.parentElement) {
+        // Check data attributes
         const dataQa = current.getAttribute('data-qa');
         if (dataQa && (dataQa.includes('buy') || dataQa.includes('sell'))) {
           return current;
         }
         
+        // Check for trade-related classes
+        const classes = current.className?.toLowerCase() || '';
+        if (classes.includes('buy-button') || classes.includes('sell-button') || 
+            classes.includes('trade-button') || classes.includes('order-button')) {
+          return current;
+        }
+        
+        // Check button text and role
         if (current.tagName === 'BUTTON' || current.role === 'button') {
           const text = current.textContent?.toLowerCase() || '';
-          const classes = current.className?.toLowerCase() || '';
           
           if (text.includes('buy') || text.includes('sell') || 
-              classes.includes('buy') || classes.includes('sell')) {
+              text.includes('long') || text.includes('short') ||
+              text.includes('market') || text.includes('limit')) {
             return current;
           }
         }
@@ -227,7 +269,35 @@
       return null;
     }
 
+    checkForTradeElements(element) {
+      // Check for trade confirmation dialogs or success messages
+      const text = element.textContent?.toLowerCase() || '';
+      const classes = element.className?.toLowerCase() || '';
+      
+      if (text.includes('order filled') || text.includes('trade executed') ||
+          text.includes('position opened') || text.includes('order confirmed') ||
+          classes.includes('trade-success') || classes.includes('order-success')) {
+        
+        console.log('🎯 Trade confirmation detected:', element);
+        this.captureTradeConfirmation(element);
+      }
+    }
+
+    isTradeInputElement(element) {
+      if (!element) return false;
+      
+      const parent = element.closest('form, .trade-form, .order-form, [data-qa*="trade"]');
+      return !!parent;
+    }
+
     async captureTradeClick(button, event) {
+      const now = Date.now();
+      if (now - this.lastTradeTime < 1000) {
+        console.log('⏱️ Duplicate trade detection prevented');
+        return;
+      }
+      this.lastTradeTime = now;
+
       const timestamp = new Date();
       const buttonText = button.textContent?.trim() || '';
       const direction = this.determineDirection(buttonText, button);
@@ -247,6 +317,63 @@
         trigger: 'button_click',
         button_text: buttonText,
         page_url: window.location.href,
+        timestamp: timestamp.toISOString(),
+        element_info: this.getElementInfo(button)
+      };
+      
+      await this.sendTradeData(tradeData);
+      this.showTradeNotification(tradeData);
+    }
+
+    async captureTradeConfirmation(element) {
+      const now = Date.now();
+      if (now - this.lastTradeTime < 2000) {
+        console.log('⏱️ Duplicate confirmation detection prevented');
+        return;
+      }
+      this.lastTradeTime = now;
+
+      const timestamp = new Date();
+      const text = element.textContent?.trim() || '';
+      
+      console.log('📈 Capturing trade confirmation:', text);
+      
+      const tradeData = {
+        id: `tradovate-conf-${Date.now()}`,
+        platform: this.platform,
+        direction: this.determineDirectionFromText(text),
+        trade_date: timestamp.toISOString().split('T')[0],
+        trade_time: timestamp.toTimeString().split(' ')[0],
+        trigger: 'confirmation_message',
+        confirmation_text: text,
+        page_url: window.location.href,
+        timestamp: timestamp.toISOString()
+      };
+      
+      await this.sendTradeData(tradeData);
+      this.showTradeNotification(tradeData);
+    }
+
+    async captureKeyboardTrade(element) {
+      const now = Date.now();
+      if (now - this.lastTradeTime < 1000) {
+        console.log('⏱️ Duplicate keyboard trade detection prevented');
+        return;
+      }
+      this.lastTradeTime = now;
+
+      const timestamp = new Date();
+      
+      console.log('📈 Capturing keyboard trade entry');
+      
+      const tradeData = {
+        id: `tradovate-key-${Date.now()}`,
+        platform: this.platform,
+        direction: 'UNKNOWN',
+        trade_date: timestamp.toISOString().split('T')[0],
+        trade_time: timestamp.toTimeString().split(' ')[0],
+        trigger: 'keyboard_entry',
+        page_url: window.location.href,
         timestamp: timestamp.toISOString()
       };
       
@@ -264,6 +391,28 @@
       }
       
       return 'UNKNOWN';
+    }
+
+    determineDirectionFromText(text) {
+      const lowerText = text.toLowerCase();
+      
+      if (lowerText.includes('buy') || lowerText.includes('long')) {
+        return 'BUY';
+      } else if (lowerText.includes('sell') || lowerText.includes('short')) {
+        return 'SELL';
+      }
+      
+      return 'UNKNOWN';
+    }
+
+    getElementInfo(element) {
+      return {
+        tagName: element.tagName,
+        className: element.className,
+        id: element.id,
+        dataQa: element.getAttribute('data-qa'),
+        textContent: element.textContent?.substring(0, 100)
+      };
     }
 
     async sendTradeData(tradeData) {
@@ -309,7 +458,7 @@
       
       notification.innerHTML = `
         📈 Trade Captured!<br>
-        <small>${trade.direction}</small><br>
+        <small>${trade.direction} • ${trade.trigger}</small><br>
         <small>${trade.trade_time}</small>
       `;
       
@@ -351,7 +500,6 @@
     }
   }
 
-  // Initialize when ready
   function initCapture() {
     try {
       new TradovateCapture();
