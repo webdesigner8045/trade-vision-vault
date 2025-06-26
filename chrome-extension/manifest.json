@@ -2,8 +2,8 @@
 {
   "manifest_version": 3,
   "name": "Replay Locker - Trade Capture",
-  "version": "1.0.0",
-  "description": "Automatically capture and sync trading data with Replay Locker web app",
+  "version": "2.0.0",
+  "description": "Automatically capture and sync trading data with comprehensive diagnostics",
   "permissions": [
     "storage",
     "activeTab",
@@ -70,7 +70,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Replay Locker - Trade Capture"
+    "default_title": "Replay Locker - Trade Capture v2.0"
   },
   "icons": {
     "16": "icons/icon16.png",
@@ -79,7 +79,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["injected-script.js"],
+      "resources": ["injected-script.js", "diagnostic.js"],
       "matches": ["<all_urls>"]
     }
   ]

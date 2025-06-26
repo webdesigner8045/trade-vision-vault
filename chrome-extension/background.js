@@ -1,38 +1,98 @@
-// Enhanced background service worker with better connection handling
+// Enhanced background service worker with comprehensive diagnostics
 class ExtensionBackground {
   constructor() {
     this.supabaseClient = null;
     this.activeConnections = new Set();
     this.contentScriptPorts = new Map();
+    this.diagnosticMode = true;
+    this.messageStats = {
+      sent: 0,
+      received: 0,
+      errors: 0
+    };
+    
+    console.log('🚀 Initializing Enhanced Background Script v2.0');
     this.initializeListeners();
     this.initializeSupabase();
+    this.startDiagnostics();
+  }
+
+  startDiagnostics() {
+    // Log status every 30 seconds in diagnostic mode
+    if (this.diagnosticMode) {
+      setInterval(() => {
+        console.log('📊 Extension Status:', {
+          connections: this.activeConnections.size,
+          contentScripts: this.contentScriptPorts.size,
+          messageStats: this.messageStats,
+          timestamp: new Date().toISOString()
+        });
+      }, 30000);
+    }
   }
 
   initializeListeners() {
-    // Listen for messages from content scripts with better error handling
+    // Enhanced message listener with better error handling
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log('📨 Background received message:', message.type, 'from tab:', sender.tab?.id);
+      this.messageStats.received++;
+      console.log('📨 Background received message:', {
+        type: message.type,
+        from: sender.tab?.id || 'popup',
+        url: sender.tab?.url || 'unknown',
+        timestamp: new Date().toISOString()
+      });
       
-      // Handle the message asynchronously but respond immediately
+      // Handle diagnostic messages immediately
+      if (message.type === 'DIAGNOSTIC_PING') {
+        const diagnosticResponse = {
+          success: true,
+          timestamp: Date.now(),
+          backgroundActive: true,
+          connections: this.activeConnections.size,
+          contentScripts: this.contentScriptPorts.size,
+          messageStats: this.messageStats
+        };
+        sendResponse(diagnosticResponse);
+        return true;
+      }
+      
+      // Handle async messages
       this.handleMessage(message, sender)
         .then(result => {
+          this.messageStats.sent++;
           if (sendResponse) {
             sendResponse(result);
           }
         })
         .catch(error => {
-          console.error('❌ Message handling error:', error);
+          this.messageStats.errors++;
+          console.error('❌ Message handling error:', {
+            messageType: message.type,
+            error: error.message,
+            stack: error.stack
+          });
           if (sendResponse) {
-            sendResponse({ error: error.message, success: false });
+            sendResponse({ 
+              error: error.message, 
+              success: false,
+              messageType: message.type,
+              timestamp: Date.now()
+            });
           }
         });
       
       return true; // Keep channel open for async response
     });
 
-    // Listen for connection attempts with better handling
+    // Enhanced connection listener
     chrome.runtime.onConnect.addListener((port) => {
-      console.log('🔌 Connection established:', port.name, 'from tab:', port.sender?.tab?.id);
+      console.log('🔌 New connection established:', {
+        name: port.name,
+        tabId: port.sender?.tab?.id,
+        url: port.sender?.tab?.url,
+        timestamp: new Date().toISOString()
+      });
+      
       this.activeConnections.add(port);
       
       if (port.sender?.tab?.id) {
@@ -45,7 +105,11 @@ class ExtensionBackground {
       });
       
       port.onDisconnect.addListener(() => {
-        console.log('🔌 Connection closed:', port.name);
+        console.log('🔌 Connection closed:', {
+          name: port.name,
+          tabId: port.sender?.tab?.id,
+          reason: chrome.runtime.lastError?.message || 'normal'
+        });
         this.activeConnections.delete(port);
         if (port.sender?.tab?.id) {
           this.contentScriptPorts.delete(port.sender.tab.id);
@@ -53,69 +117,60 @@ class ExtensionBackground {
       });
     });
 
-    // Listen for extension installation
-    chrome.runtime.onInstalled.addListener(() => {
-      console.log('🚀 Replay Locker extension installed');
+    // Installation and startup
+    chrome.runtime.onInstalled.addListener((details) => {
+      console.log('🚀 Extension installed/updated:', details);
       this.setupDefaultSettings();
+      this.injectIntoExistingTabs();
     });
 
-    // Listen for tab updates to inject content scripts
+    chrome.runtime.onStartup.addListener(() => {
+      console.log('🚀 Extension started on browser startup');
+      this.initializeSupabase();
+      this.injectIntoExistingTabs();
+    });
+
+    // Enhanced tab update listener
     chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (changeInfo.status === 'complete' && tab.url) {
+        console.log('📄 Tab updated:', {
+          tabId,
+          url: tab.url,
+          title: tab.title
+        });
         this.injectContentScriptIfNeeded(tabId, tab.url);
       }
     });
 
-    // Handle startup
-    chrome.runtime.onStartup.addListener(() => {
-      console.log('🚀 Extension started');
-      this.initializeSupabase();
-    });
-  }
-
-  async handlePortMessage(message, port) {
-    try {
-      const response = await this.handleMessage(message, { tab: port.sender?.tab });
-      port.postMessage(response);
-    } catch (error) {
-      console.error('❌ Port message error:', error);
-      port.postMessage({ error: error.message, success: false });
-    }
-  }
-
-  async initializeSupabase() {
-    try {
-      this.supabaseClient = {
-        url: 'https://akhcugmczkfxrhzuadlo.supabase.co',
-        key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFraGN1Z21jemtmeHJoenVhZGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4MDM3MTMsImV4cCI6MjA2NjM3OTcxM30.G93cLEdFV4yngYmr7KbDG2IP9Z2WuGBS_Ug3AVXdrt4'
-      };
-      console.log('✅ Supabase client configured');
-    } catch (error) {
-      console.log('❌ Supabase client configuration failed:', error);
-    }
-  }
-
-  async setupDefaultSettings() {
-    await chrome.storage.local.set({
-      isRecording: false,
-      autoSync: true,
-      captureScreenshots: true,
-      enableNotifications: true,
-      syncInterval: 15,
-      settings: {
-        autoRecord: true,
-        showNotifications: true,
-        autoScreenshot: false,
-        autoSync: true,
-        syncInterval: 15,
-        tradingviewEnabled: true,
-        mt4Enabled: true
+    // Listen for tab activation to ensure scripts are injected
+    chrome.tabs.onActivated.addListener(async (activeInfo) => {
+      try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        if (tab.url) {
+          this.injectContentScriptIfNeeded(activeInfo.tabId, tab.url);
+        }
+      } catch (error) {
+        console.log('❌ Error handling tab activation:', error.message);
       }
     });
-    console.log('✅ Default settings configured');
   }
 
-  async injectContentScriptIfNeeded(tabId, url) {
+  async injectIntoExistingTabs() {
+    try {
+      const tabs = await chrome.tabs.query({});
+      console.log(`🔍 Checking ${tabs.length} existing tabs for injection...`);
+      
+      for (const tab of tabs) {
+        if (tab.url && this.shouldInjectIntoUrl(tab.url)) {
+          await this.injectContentScriptIfNeeded(tab.id, tab.url);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Failed to inject into existing tabs:', error);
+    }
+  }
+
+  shouldInjectIntoUrl(url) {
     const supportedDomains = [
       'tradingview.com',
       'tradovate.com',
@@ -129,51 +184,63 @@ class ExtensionBackground {
       'avatrade.com'
     ];
 
-    const shouldInject = supportedDomains.some(domain => url.includes(domain));
-    
-    if (shouldInject) {
-      try {
-        // Add delay to ensure page is fully loaded
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Check if content script is already injected
-        const results = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: () => !!window.replayLockerInjected
-        }).catch(() => [{ result: false }]);
+    return supportedDomains.some(domain => url.includes(domain));
+  }
 
-        if (!results[0]?.result) {
-          if (url.includes('tradingview.com')) {
-            await chrome.scripting.executeScript({
-              target: { tabId },
-              files: ['content-tradingview.js']
-            });
-            console.log('✅ TradingView content script injected into tab:', tabId);
-          } else {
-            await chrome.scripting.executeScript({
-              target: { tabId },
-              files: ['content-mt4.js']
-            });
-            console.log('✅ Trading platform content script injected into tab:', tabId);
-          }
-          
-          // Send initial recording status to newly injected script
-          setTimeout(() => {
-            this.sendMessageToTab(tabId, {
-              type: 'RECORDING_STATUS_UPDATE',
-              isRecording: false
-            });
-          }, 1000);
+  async injectContentScriptIfNeeded(tabId, url) {
+    if (!this.shouldInjectIntoUrl(url)) return;
+
+    try {
+      console.log(`🔍 Attempting to inject content script into tab ${tabId}:`, url);
+      
+      // Check if content script is already injected
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          return {
+            injected: !!window.replayLockerInjected,
+            hasMonitor: !!window.tradingMonitor,
+            timestamp: Date.now()
+          };
         }
-      } catch (error) {
-        console.log('❌ Failed to inject content script:', error);
+      }).catch(() => [{ result: { injected: false, error: 'execution_failed' } }]);
+
+      const scriptStatus = results[0]?.result;
+      console.log(`📊 Script status for tab ${tabId}:`, scriptStatus);
+
+      if (!scriptStatus?.injected) {
+        // Determine which script to inject
+        const scriptFile = url.includes('tradingview.com') ? 'content-tradingview.js' : 'content-mt4.js';
+        
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: [scriptFile]
+        });
+        
+        console.log(`✅ ${scriptFile} injected into tab ${tabId}`);
+        
+        // Send initial recording status after injection
+        setTimeout(() => {
+          this.sendMessageToTab(tabId, {
+            type: 'RECORDING_STATUS_UPDATE',
+            isRecording: false
+          });
+        }, 2000);
+      } else {
+        console.log(`ℹ️ Content script already injected in tab ${tabId}`);
       }
+    } catch (error) {
+      console.error(`❌ Failed to inject content script into tab ${tabId}:`, {
+        error: error.message,
+        url: url
+      });
     }
   }
 
   async sendMessageToTab(tabId, message) {
     try {
       await chrome.tabs.sendMessage(tabId, message);
+      console.log(`📤 Message sent to tab ${tabId}:`, message.type);
     } catch (error) {
       console.log(`❌ Failed to send message to tab ${tabId}:`, error.message);
     }
@@ -181,15 +248,24 @@ class ExtensionBackground {
 
   async handleMessage(message, sender) {
     try {
-      console.log('🔄 Processing message:', message.type);
+      console.log('🔄 Processing message:', {
+        type: message.type,
+        tabId: sender.tab?.id,
+        timestamp: Date.now()
+      });
       
       switch (message.type) {
         case 'PING':
-          return { success: true, timestamp: Date.now() };
+          return { 
+            success: true, 
+            timestamp: Date.now(),
+            backgroundVersion: '2.0',
+            activeConnections: this.activeConnections.size
+          };
 
         case 'TRADE_DETECTED':
-          await this.handleTradeDetection(message.data, sender.tab);
-          return { success: true };
+          console.log('📈 Trade detected:', message.data);
+          return await this.handleTradeDetection(message.data, sender.tab);
 
         case 'GET_RECORDING_STATUS':
           const status = await this.getRecordingStatus();
@@ -206,8 +282,7 @@ class ExtensionBackground {
           return { success: !!screenshot, screenshot };
 
         case 'SYNC_TRADES':
-          const syncResult = await this.syncTradesToSupabase();
-          return syncResult;
+          return await this.syncTradesToSupabase();
 
         case 'GET_TRADES':
           const trades = await this.getStoredTrades();
@@ -229,14 +304,43 @@ class ExtensionBackground {
           const exportData = await this.exportTrades();
           return { success: true, data: exportData };
 
+        case 'RUN_DIAGNOSTIC':
+          return await this.runDiagnostic();
+
         default:
           console.warn('⚠️ Unknown message type:', message.type);
-          return { success: false, error: 'Unknown message type' };
+          return { success: false, error: `Unknown message type: ${message.type}` };
       }
     } catch (error) {
-      console.error('❌ Background script error:', error);
-      return { success: false, error: error.message };
+      console.error('❌ Background script error:', {
+        messageType: message.type,
+        error: error.message,
+        stack: error.stack
+      });
+      return { success: false, error: error.message, messageType: message.type };
     }
+  }
+
+  async runDiagnostic() {
+    console.log('🔍 Running background diagnostic...');
+    
+    const tabs = await chrome.tabs.query({});
+    const relevantTabs = tabs.filter(tab => this.shouldInjectIntoUrl(tab.url || ''));
+    
+    const diagnostic = {
+      backgroundActive: true,
+      timestamp: Date.now(),
+      connections: this.activeConnections.size,
+      contentScripts: this.contentScriptPorts.size,
+      messageStats: this.messageStats,
+      totalTabs: tabs.length,
+      relevantTabs: relevantTabs.length,
+      supabaseConfigured: !!this.supabaseClient,
+      storage: await chrome.storage.local.get()
+    };
+    
+    console.log('📊 Diagnostic results:', diagnostic);
+    return { success: true, diagnostic };
   }
 
   async handleTradeDetection(tradeData, tab) {
@@ -267,6 +371,7 @@ class ExtensionBackground {
     }
     
     console.log('✅ Trade captured and stored:', newTrade);
+    return { success: true, trade: newTrade };
   }
 
   async toggleRecording(isRecording) {
@@ -320,6 +425,83 @@ class ExtensionBackground {
     } catch (error) {
       console.error('❌ Screenshot capture failed:', error);
       return null;
+    }
+  }
+
+  async initializeSupabase() {
+    try {
+      this.supabaseClient = {
+        url: 'https://akhcugmczkfxrhzuadlo.supabase.co',
+        key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFraGN1Z21jemtmeHJoenVhZGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4MDM3MTMsImV4cCI6MjA2NjM3OTcxM30.G93cLEdFV4yngYmr7KbDG2IP9Z2WuGBS_Ug3AVXdrt4'
+      };
+      console.log('✅ Supabase client configured');
+    } catch (error) {
+      console.log('❌ Supabase client configuration failed:', error);
+    }
+  }
+
+  async setupDefaultSettings() {
+    await chrome.storage.local.set({
+      isRecording: false,
+      autoSync: true,
+      captureScreenshots: true,
+      enableNotifications: true,
+      syncInterval: 15,
+      settings: {
+        autoRecord: true,
+        showNotifications: true,
+        autoScreenshot: false,
+        autoSync: true,
+        syncInterval: 15,
+        tradingviewEnabled: true,
+        mt4Enabled: true
+      }
+    });
+    console.log('✅ Default settings configured');
+  }
+
+  async getStoredTrades() {
+    const result = await chrome.storage.local.get('trades');
+    return result.trades || [];
+  }
+
+  async getStoredScreenshots() {
+    const result = await chrome.storage.local.get('screenshots');
+    return result.screenshots || [];
+  }
+
+  async getRecordingStatus() {
+    const result = await chrome.storage.local.get('isRecording');
+    return result.isRecording || false;
+  }
+
+  showTradeNotification() {
+    chrome.action.setBadgeText({ text: '!' });
+    chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+    
+    setTimeout(() => {
+      chrome.action.setBadgeText({ text: '' });
+    }, 5000);
+
+    chrome.storage.local.get('enableNotifications').then(result => {
+      if (result.enableNotifications !== false) {
+        chrome.notifications.create({
+          type: 'basic',
+          iconUrl: 'icons/icon48.png',
+          title: 'Trade Captured!',
+          message: 'New trade data has been recorded'
+        });
+      }
+    });
+  }
+
+  async handlePortMessage(message, port) {
+    try {
+      const response = await this.handleMessage(message, { tab: port.sender?.tab });
+      port.postMessage(response);
+    } catch (error) {
+      console.error('❌ Port message error:', error);
+      port.postMessage({ error: error.message, success: false });
     }
   }
 
@@ -463,43 +645,11 @@ class ExtensionBackground {
       total_screenshots: screenshots.length
     };
   }
-
-  async getStoredTrades() {
-    const result = await chrome.storage.local.get('trades');
-    return result.trades || [];
-  }
-
-  async getStoredScreenshots() {
-    const result = await chrome.storage.local.get('screenshots');
-    return result.screenshots || [];
-  }
-
-  async getRecordingStatus() {
-    const result = await chrome.storage.local.get('isRecording');
-    return result.isRecording || false;
-  }
-
-  showTradeNotification() {
-    chrome.action.setBadgeText({ text: '!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-    
-    setTimeout(() => {
-      chrome.action.setBadgeText({ text: '' });
-    }, 5000);
-
-    chrome.storage.local.get('enableNotifications').then(result => {
-      if (result.enableNotifications !== false) {
-        chrome.notifications.create({
-          type: 'basic',
-          iconUrl: 'icons/icon48.png',
-          title: 'Trade Captured!',
-          message: 'New trade data has been recorded'
-        });
-      }
-    });
-  }
 }
 
 // Initialize background script
-console.log('🚀 Initializing Replay Locker background script');
-new ExtensionBackground();
+console.log('🚀 Initializing Enhanced Replay Locker Background Script v2.0');
+const backgroundInstance = new ExtensionBackground();
+
+// Make diagnostic available globally
+window.backgroundInstance = backgroundInstance;
