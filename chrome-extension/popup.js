@@ -1,72 +1,57 @@
-// Enhanced popup script with comprehensive diagnostics
+
+// Enhanced popup controller v2.1
 class PopupController {
   constructor() {
     this.isRecording = false;
     this.connectionStatus = 'disconnected';
-    this.diagnosticMode = true;
-    this.lastError = null;
-    
-    console.log('🚀 Popup Controller v2.0 initialized');
     this.init();
   }
 
   async init() {
     try {
       console.log('📱 Initializing popup...');
-      
       await this.testConnection();
       await this.loadRecordingStatus();
       this.setupEventListeners();
       this.updateUI();
-      
-      if (this.diagnosticMode) {
-        await this.runDiagnostic();
-      }
-      
-      console.log('✅ Popup initialized successfully');
+      await this.runQuickDiagnostic();
+      console.log('✅ Popup initialized');
     } catch (error) {
-      console.error('❌ Popup initialization failed:', error);
+      console.error('❌ Popup init failed:', error);
       this.handleError('Initialization failed', error);
     }
   }
 
   async testConnection() {
     try {
-      console.log('🔌 Testing connection to background...');
-      
       const response = await this.sendMessage({ type: 'PING' });
-      
-      if (response && response.success) {
+      if (response?.success) {
         this.connectionStatus = 'connected';
-        console.log('✅ Connection established:', response);
+        console.log('✅ Background connection OK');
       } else {
-        throw new Error('Invalid ping response');
+        throw new Error('Invalid response');
       }
     } catch (error) {
       this.connectionStatus = 'disconnected';
-      console.error('❌ Connection test failed:', error);
       throw error;
     }
   }
 
-  async runDiagnostic() {
+  async runQuickDiagnostic() {
     try {
-      console.log('🔍 Running popup diagnostic...');
-      
-      const diagnosticResponse = await this.sendMessage({ type: 'RUN_DIAGNOSTIC' });
-      
-      if (diagnosticResponse && diagnosticResponse.success) {
-        console.log('📊 Background diagnostic:', diagnosticResponse.diagnostic);
+      const response = await this.sendMessage({ type: 'RUN_DIAGNOSTIC' });
+      if (response?.success) {
+        const diagnostic = response.diagnostic;
+        console.log('📊 Quick diagnostic:', diagnostic);
         
-        // Test current tab
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tabs.length > 0) {
-          try {
-            const tabResponse = await this.sendMessageToTab(tabs[0].id, { type: 'DIAGNOSTIC_PING' });
-            console.log('📊 Content script diagnostic:', tabResponse);
-          } catch (error) {
-            console.log('❌ Content script not available:', error.message);
-          }
+        // Update diagnostic display
+        const diagnosticElement = document.getElementById('diagnosticInfo');
+        if (diagnosticElement) {
+          diagnosticElement.innerHTML = `
+            <div style="font-size: 11px; color: #666; margin-top: 8px;">
+              Tabs: ${diagnostic.totalTabs} | Relevant: ${diagnostic.relevantTabs} | Injected: ${diagnostic.injectedTabs}
+            </div>
+          `;
         }
       }
     } catch (error) {
@@ -74,45 +59,19 @@ class PopupController {
     }
   }
 
-  sendMessage(message, timeout = 8000) {
+  sendMessage(message, timeout = 5000) {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new Error(`Message timeout after ${timeout}ms`));
+        reject(new Error('Message timeout'));
       }, timeout);
 
-      try {
-        chrome.runtime.sendMessage(message, (response) => {
-          clearTimeout(timeoutId);
-          
-          if (chrome.runtime.lastError) {
-            const error = new Error(chrome.runtime.lastError.message);
-            console.error('❌ Runtime error:', error.message);
-            reject(error);
-            return;
-          }
-          
-          if (response && response.error) {
-            const error = new Error(response.error);
-            console.error('❌ Response error:', error.message);
-            reject(error);
-            return;
-          }
-          
-          resolve(response);
-        });
-      } catch (error) {
+      chrome.runtime.sendMessage(message, (response) => {
         clearTimeout(timeoutId);
-        console.error('❌ Send message exception:', error);
-        reject(error);
-      }
-    });
-  }
-
-  sendMessageToTab(tabId, message) {
-    return new Promise((resolve, reject) => {
-      chrome.tabs.sendMessage(tabId, message, (response) => {
+        
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
+        } else if (response?.error) {
+          reject(new Error(response.error));
         } else {
           resolve(response);
         }
@@ -122,44 +81,24 @@ class PopupController {
 
   async loadRecordingStatus() {
     try {
-      console.log('📊 Loading recording status...');
-      
       const response = await this.sendMessage({ type: 'GET_RECORDING_STATUS' });
-      
-      if (response && response.success) {
-        this.isRecording = response.isRecording || false;
-        console.log('📊 Recording status loaded:', this.isRecording);
-      } else {
-        console.warn('⚠️ Failed to load recording status, using default');
-        this.isRecording = false;
-      }
+      this.isRecording = response?.isRecording || false;
+      console.log('📊 Recording status:', this.isRecording);
     } catch (error) {
-      console.error('❌ Error loading recording status:', error);
+      console.error('❌ Status load failed:', error);
       this.isRecording = false;
-      this.handleError('Failed to load status', error);
     }
   }
 
   setupEventListeners() {
-    console.log('🎛️ Setting up event listeners...');
-    
-    // Record button
     const recordBtn = document.getElementById('recordBtn');
     if (recordBtn) {
       recordBtn.addEventListener('click', () => this.toggleRecording());
-    } else {
-      console.error('❌ Record button not found');
     }
 
-    // Other buttons
     const captureBtn = document.getElementById('captureBtn');
     if (captureBtn) {
       captureBtn.addEventListener('click', () => this.captureScreenshot());
-    }
-
-    const syncBtn = document.getElementById('syncBtn');
-    if (syncBtn) {
-      syncBtn.addEventListener('click', () => this.syncTrades());
     }
 
     const viewBtn = document.getElementById('viewBtn');
@@ -167,37 +106,30 @@ class PopupController {
       viewBtn.addEventListener('click', () => this.viewTrades());
     }
 
-    // Diagnostic button (if exists)
     const diagnosticBtn = document.getElementById('diagnosticBtn');
     if (diagnosticBtn) {
-      diagnosticBtn.addEventListener('click', () => this.showDiagnostic());
+      diagnosticBtn.addEventListener('click', () => this.showDetailedDiagnostic());
     }
-
-    console.log('✅ Event listeners set up');
   }
 
   async toggleRecording() {
     try {
-      console.log('🔄 Toggling recording...');
-      
       this.setButtonLoading('recordBtn', true);
       
-      const newRecordingState = !this.isRecording;
       const response = await this.sendMessage({
         type: 'TOGGLE_RECORDING',
-        isRecording: newRecordingState
+        isRecording: !this.isRecording
       });
 
-      if (response && response.success) {
-        this.isRecording = response.isRecording !== undefined ? response.isRecording : newRecordingState;
-        console.log('✅ Recording toggled successfully:', this.isRecording);
+      if (response?.success) {
+        this.isRecording = response.isRecording;
         this.updateUI();
         this.showStatus(`Recording ${this.isRecording ? 'started' : 'stopped'}`, 'success');
       } else {
-        throw new Error('Toggle recording failed');
+        throw new Error('Toggle failed');
       }
     } catch (error) {
-      console.error('❌ Toggle recording error:', error);
+      console.error('❌ Toggle error:', error);
       this.handleError('Failed to toggle recording', error);
     } finally {
       this.setButtonLoading('recordBtn', false);
@@ -206,108 +138,62 @@ class PopupController {
 
   async captureScreenshot() {
     try {
-      console.log('📸 Capturing screenshot...');
-      
       this.setButtonLoading('captureBtn', true);
-      
       const response = await this.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
       
-      if (response && response.success) {
-        console.log('✅ Screenshot captured');
+      if (response?.success) {
         this.showStatus('Screenshot captured!', 'success');
       } else {
-        throw new Error('Screenshot capture failed');
+        throw new Error('Capture failed');
       }
     } catch (error) {
-      console.error('❌ Screenshot error:', error);
-      this.handleError('Failed to capture screenshot', error);
+      this.handleError('Screenshot failed', error);
     } finally {
       this.setButtonLoading('captureBtn', false);
     }
   }
 
-  async syncTrades() {
-    try {
-      console.log('🔄 Syncing trades...');
-      
-      this.setButtonLoading('syncBtn', true);
-      
-      const response = await this.sendMessage({ type: 'SYNC_TRADES' });
-      
-      if (response && response.success) {
-        console.log('✅ Trades synced:', response.message);
-        this.showStatus(response.message || 'Trades synced!', 'success');
-      } else {
-        throw new Error(response?.error || 'Sync failed');
-      }
-    } catch (error) {
-      console.error('❌ Sync error:', error);
-      this.handleError('Failed to sync trades', error);
-    } finally {
-      this.setButtonLoading('syncBtn', false);
-    }
-  }
-
   async viewTrades() {
     try {
-      console.log('👀 Loading trades...');
-      
       const response = await this.sendMessage({ type: 'GET_TRADES' });
-      
-      if (response && response.success) {
-        console.log('✅ Trades loaded:', response.trades?.length || 0);
+      if (response?.success) {
         this.displayTrades(response.trades || []);
-      } else {
-        throw new Error('Failed to load trades');
       }
     } catch (error) {
-      console.error('❌ View trades error:', error);
       this.handleError('Failed to load trades', error);
     }
   }
 
-  async showDiagnostic() {
+  async showDetailedDiagnostic() {
     try {
-      console.log('🔍 Showing diagnostic...');
-      
       const response = await this.sendMessage({ type: 'RUN_DIAGNOSTIC' });
-      
-      if (response && response.success) {
+      if (response?.success) {
+        console.log('📊 Detailed diagnostic:', response.diagnostic);
         this.displayDiagnostic(response.diagnostic);
-      } else {
-        throw new Error('Diagnostic failed');
       }
     } catch (error) {
-      console.error('❌ Diagnostic error:', error);
-      this.handleError('Failed to run diagnostic', error);
+      this.handleError('Diagnostic failed', error);
     }
   }
 
   updateUI() {
-    console.log('🎨 Updating UI...');
-    
-    // Update record button
     const recordBtn = document.getElementById('recordBtn');
     if (recordBtn) {
       recordBtn.textContent = this.isRecording ? 'Stop Recording' : 'Start Recording';
       recordBtn.className = `btn ${this.isRecording ? 'btn-danger' : 'btn-success'}`;
     }
 
-    // Update status indicator
     const statusIndicator = document.getElementById('statusIndicator');
     if (statusIndicator) {
       statusIndicator.textContent = this.isRecording ? 'Recording' : 'Stopped';
       statusIndicator.className = `status ${this.isRecording ? 'status-recording' : 'status-stopped'}`;
     }
 
-    // Update connection status
     const connectionStatus = document.getElementById('connectionStatus');
     if (connectionStatus) {
       connectionStatus.textContent = this.connectionStatus === 'connected' ? 'Connected' : 'Disconnected';
       connectionStatus.className = `connection ${this.connectionStatus}`;
     }
-
-    console.log('✅ UI updated');
   }
 
   setButtonLoading(buttonId, isLoading) {
@@ -315,29 +201,22 @@ class PopupController {
     if (button) {
       button.disabled = isLoading;
       if (isLoading) {
-        button.classList.add('loading');
         button.dataset.originalText = button.textContent;
         button.textContent = 'Loading...';
-      } else {
-        button.classList.remove('loading');
-        if (button.dataset.originalText) {
-          button.textContent = button.dataset.originalText;
-          delete button.dataset.originalText;
-        }
+      } else if (button.dataset.originalText) {
+        button.textContent = button.dataset.originalText;
+        delete button.dataset.originalText;
       }
     }
   }
 
   showStatus(message, type = 'info') {
-    console.log(`📢 Status: ${message} (${type})`);
-    
     const statusElement = document.getElementById('statusMessage');
     if (statusElement) {
       statusElement.textContent = message;
       statusElement.className = `status-message ${type}`;
       statusElement.style.display = 'block';
       
-      // Auto-hide after 3 seconds
       setTimeout(() => {
         statusElement.style.display = 'none';
       }, 3000);
@@ -345,94 +224,50 @@ class PopupController {
   }
 
   handleError(context, error) {
-    this.lastError = { context, error: error.message, timestamp: Date.now() };
     console.error(`❌ ${context}:`, error);
     this.showStatus(`${context}: ${error.message}`, 'error');
   }
 
   displayTrades(trades) {
-    const tradesContainer = document.getElementById('tradesContainer');
-    if (!tradesContainer) return;
+    const container = document.getElementById('tradesContainer');
+    if (!container) return;
 
     if (trades.length === 0) {
-      tradesContainer.innerHTML = '<p>No trades found</p>';
+      container.innerHTML = '<p style="text-align: center; color: #666;">No trades captured yet</p>';
       return;
     }
 
     const tradesHtml = trades.map(trade => `
-      <div class="trade-item">
-        <div class="trade-header">
-          <strong>${trade.instrument || 'Unknown'}</strong>
-          <span class="trade-direction ${trade.direction?.toLowerCase()}">${trade.direction || 'N/A'}</span>
-        </div>
-        <div class="trade-details">
-          <small>Platform: ${trade.platform || 'Unknown'}</small><br>
-          <small>Price: ${trade.entry_price || 'N/A'}</small><br>
-          <small>Time: ${trade.trade_time || 'N/A'}</small>
-          <small>Synced: ${trade.synced ? '✅' : '❌'}</small>
-        </div>
+      <div style="border: 1px solid #ddd; padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 12px;">
+        <strong>${trade.instrument || 'Unknown'}</strong> - ${trade.direction || 'N/A'}<br>
+        <small>${trade.platform || 'Unknown'} | ${trade.trade_time || 'N/A'}</small>
       </div>
     `).join('');
 
-    tradesContainer.innerHTML = tradesHtml;
+    container.innerHTML = tradesHtml;
   }
 
   displayDiagnostic(diagnostic) {
-    const diagnosticContainer = document.getElementById('diagnosticContainer');
-    if (!diagnosticContainer) {
-      console.log('📊 Diagnostic Results:', diagnostic);
+    const container = document.getElementById('diagnosticContainer');
+    if (!container) {
+      alert(`Diagnostic Results:\n- Background Active: ${diagnostic.backgroundActive}\n- Injected Tabs: ${diagnostic.injectedTabs}\n- Relevant Tabs: ${diagnostic.relevantTabs}`);
       return;
     }
 
-    const diagnosticHtml = `
-      <div class="diagnostic-info">
-        <h3>Extension Diagnostic</h3>
-        <div class="diagnostic-item">
-          <strong>Background Active:</strong> ${diagnostic.backgroundActive ? '✅' : '❌'}
-        </div>
-        <div class="diagnostic-item">
-          <strong>Connections:</strong> ${diagnostic.connections}
-        </div>
-        <div class="diagnostic-item">
-          <strong>Content Scripts:</strong> ${diagnostic.contentScripts}
-        </div>
-        <div class="diagnostic-item">
-          <strong>Total Tabs:</strong> ${diagnostic.totalTabs}
-        </div>
-        <div class="diagnostic-item">
-          <strong>Relevant Tabs:</strong> ${diagnostic.relevantTabs}
-        </div>
-        <div class="diagnostic-item">
-          <strong>Messages Sent:</strong> ${diagnostic.messageStats?.sent || 0}
-        </div>
-        <div class="diagnostic-item">
-          <strong>Messages Received:</strong> ${diagnostic.messageStats?.received || 0}
-        </div>
-        <div class="diagnostic-item">
-          <strong>Message Errors:</strong> ${diagnostic.messageStats?.errors || 0}
-        </div>
+    container.innerHTML = `
+      <div style="font-size: 12px; padding: 8px; background: #f5f5f5; border-radius: 4px;">
+        <div><strong>Background:</strong> ${diagnostic.backgroundActive ? '✅' : '❌'}</div>
+        <div><strong>Total Tabs:</strong> ${diagnostic.totalTabs}</div>
+        <div><strong>Relevant Tabs:</strong> ${diagnostic.relevantTabs}</div>
+        <div><strong>Injected Tabs:</strong> ${diagnostic.injectedTabs}</div>
+        <div><strong>Messages:</strong> ${diagnostic.messageStats?.received || 0} received</div>
       </div>
     `;
-
-    diagnosticContainer.innerHTML = diagnosticHtml;
-    diagnosticContainer.style.display = 'block';
+    container.style.display = 'block';
   }
 }
 
-// Initialize popup when DOM is ready
+// Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('📱 DOM loaded, initializing popup controller...');
   window.popupController = new PopupController();
 });
-
-// Global error handler
-window.addEventListener('error', (event) => {
-  console.error('❌ Global popup error:', event.error);
-});
-
-// Handle unhandled promise rejections
-window.addEventListener('unhandledrejection', (event) => {
-  console.error('❌ Unhandled promise rejection in popup:', event.reason);
-});
-
-console.log('✅ Enhanced popup script v2.0 loaded');

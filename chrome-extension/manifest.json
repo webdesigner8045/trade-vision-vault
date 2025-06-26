@@ -43,29 +43,19 @@
       ],
       "js": ["content-tradingview.js"],
       "css": ["content-styles.css"],
-      "run_at": "document_end"
+      "run_at": "document_idle",
+      "all_frames": false
     },
     {
       "matches": [
         "https://trader.tradovate.com/*",
         "https://www.tradovate.com/*",
-        "https://tradovate.com/*",
-        "https://*.mt4web.com/*",
-        "https://*.mt5web.com/*",
-        "https://*.fxpro.com/*",
-        "https://*.oanda.com/*",
-        "https://*.ig.com/*",
-        "https://*.etoro.com/*",
-        "https://*.plus500.com/*",
-        "https://*.avatrade.com/*",
-        "https://*.fxtm.com/*",
-        "https://*.xm.com/*",
-        "https://*.pepperstone.com/*",
-        "https://*.forex.com/*"
+        "https://tradovate.com/*"
       ],
-      "js": ["content-mt4.js"],
+      "js": ["content-tradovate.js"],
       "css": ["content-styles.css"],
-      "run_at": "document_end"
+      "run_at": "document_idle",
+      "all_frames": false
     }
   ],
   "action": {
@@ -82,5 +72,8 @@
       "resources": ["injected-script.js", "diagnostic.js"],
       "matches": ["<all_urls>"]
     }
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  }
 }
