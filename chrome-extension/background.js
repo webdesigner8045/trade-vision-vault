@@ -3,6 +3,7 @@ class ExtensionBackground {
   constructor() {
     this.supabaseClient = null;
     this.activeConnections = new Set();
+    this.contentScriptPorts = new Map();
     this.initializeListeners();
     this.initializeSupabase();
   }
@@ -10,28 +11,51 @@ class ExtensionBackground {
   initializeListeners() {
     // Listen for messages from content scripts with better error handling
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      // Ensure we always respond to prevent "receiver end does not exist" errors
-      this.handleMessage(message, sender, sendResponse).catch(error => {
-        console.error('Message handling error:', error);
-        sendResponse({ error: error.message });
-      });
+      console.log('📨 Background received message:', message.type, 'from tab:', sender.tab?.id);
+      
+      // Handle the message asynchronously but respond immediately
+      this.handleMessage(message, sender)
+        .then(result => {
+          if (sendResponse) {
+            sendResponse(result);
+          }
+        })
+        .catch(error => {
+          console.error('❌ Message handling error:', error);
+          if (sendResponse) {
+            sendResponse({ error: error.message, success: false });
+          }
+        });
+      
       return true; // Keep channel open for async response
     });
 
-    // Listen for connection attempts
+    // Listen for connection attempts with better handling
     chrome.runtime.onConnect.addListener((port) => {
-      console.log('Connection established:', port.name);
+      console.log('🔌 Connection established:', port.name, 'from tab:', port.sender?.tab?.id);
       this.activeConnections.add(port);
       
+      if (port.sender?.tab?.id) {
+        this.contentScriptPorts.set(port.sender.tab.id, port);
+      }
+      
+      port.onMessage.addListener((message) => {
+        console.log('📨 Port message received:', message);
+        this.handlePortMessage(message, port);
+      });
+      
       port.onDisconnect.addListener(() => {
-        console.log('Connection closed:', port.name);
+        console.log('🔌 Connection closed:', port.name);
         this.activeConnections.delete(port);
+        if (port.sender?.tab?.id) {
+          this.contentScriptPorts.delete(port.sender.tab.id);
+        }
       });
     });
 
     // Listen for extension installation
     chrome.runtime.onInstalled.addListener(() => {
-      console.log('Replay Locker extension installed');
+      console.log('🚀 Replay Locker extension installed');
       this.setupDefaultSettings();
     });
 
@@ -44,9 +68,19 @@ class ExtensionBackground {
 
     // Handle startup
     chrome.runtime.onStartup.addListener(() => {
-      console.log('Extension started');
+      console.log('🚀 Extension started');
       this.initializeSupabase();
     });
+  }
+
+  async handlePortMessage(message, port) {
+    try {
+      const response = await this.handleMessage(message, { tab: port.sender?.tab });
+      port.postMessage(response);
+    } catch (error) {
+      console.error('❌ Port message error:', error);
+      port.postMessage({ error: error.message, success: false });
+    }
   }
 
   async initializeSupabase() {
@@ -55,9 +89,9 @@ class ExtensionBackground {
         url: 'https://akhcugmczkfxrhzuadlo.supabase.co',
         key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFraGN1Z21jemtmeHJoenVhZGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA4MDM3MTMsImV4cCI6MjA2NjM3OTcxM30.G93cLEdFV4yngYmr7KbDG2IP9Z2WuGBS_Ug3AVXdrt4'
       };
-      console.log('Supabase client configured');
+      console.log('✅ Supabase client configured');
     } catch (error) {
-      console.log('Supabase client configuration failed:', error);
+      console.log('❌ Supabase client configuration failed:', error);
     }
   }
 
@@ -78,6 +112,7 @@ class ExtensionBackground {
         mt4Enabled: true
       }
     });
+    console.log('✅ Default settings configured');
   }
 
   async injectContentScriptIfNeeded(tabId, url) {
@@ -99,7 +134,7 @@ class ExtensionBackground {
     if (shouldInject) {
       try {
         // Add delay to ensure page is fully loaded
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Check if content script is already injected
         const results = await chrome.scripting.executeScript({
@@ -107,93 +142,100 @@ class ExtensionBackground {
           func: () => !!window.replayLockerInjected
         }).catch(() => [{ result: false }]);
 
-        if (!results[0].result) {
+        if (!results[0]?.result) {
           if (url.includes('tradingview.com')) {
             await chrome.scripting.executeScript({
               target: { tabId },
               files: ['content-tradingview.js']
             });
-            console.log('TradingView content script injected into tab:', tabId);
+            console.log('✅ TradingView content script injected into tab:', tabId);
           } else {
             await chrome.scripting.executeScript({
               target: { tabId },
               files: ['content-mt4.js']
             });
-            console.log('Trading platform content script injected into tab:', tabId);
+            console.log('✅ Trading platform content script injected into tab:', tabId);
           }
+          
+          // Send initial recording status to newly injected script
+          setTimeout(() => {
+            this.sendMessageToTab(tabId, {
+              type: 'RECORDING_STATUS_UPDATE',
+              isRecording: false
+            });
+          }, 1000);
         }
       } catch (error) {
-        console.log('Failed to inject content script:', error);
+        console.log('❌ Failed to inject content script:', error);
       }
     }
   }
 
-  async handleMessage(message, sender, sendResponse) {
+  async sendMessageToTab(tabId, message) {
     try {
-      console.log('Received message:', message.type, 'from tab:', sender.tab?.id);
+      await chrome.tabs.sendMessage(tabId, message);
+    } catch (error) {
+      console.log(`❌ Failed to send message to tab ${tabId}:`, error.message);
+    }
+  }
+
+  async handleMessage(message, sender) {
+    try {
+      console.log('🔄 Processing message:', message.type);
       
       switch (message.type) {
+        case 'PING':
+          return { success: true, timestamp: Date.now() };
+
         case 'TRADE_DETECTED':
           await this.handleTradeDetection(message.data, sender.tab);
-          sendResponse({ success: true });
-          break;
+          return { success: true };
 
         case 'GET_RECORDING_STATUS':
           const status = await this.getRecordingStatus();
-          sendResponse({ isRecording: status });
-          break;
+          console.log('📊 Recording status requested:', status);
+          return { success: true, isRecording: status };
 
         case 'TOGGLE_RECORDING':
-          await this.toggleRecording(message.isRecording);
-          sendResponse({ success: true });
-          break;
+          const newStatus = await this.toggleRecording(message.isRecording);
+          console.log('🔄 Recording toggled to:', newStatus);
+          return { success: true, isRecording: newStatus };
 
         case 'CAPTURE_SCREENSHOT':
-          const screenshot = await this.captureScreenshot(sender.tab.id);
-          sendResponse(screenshot);
-          break;
+          const screenshot = await this.captureScreenshot(sender.tab?.id);
+          return { success: !!screenshot, screenshot };
 
         case 'SYNC_TRADES':
           const syncResult = await this.syncTradesToSupabase();
-          sendResponse(syncResult);
-          break;
+          return syncResult;
 
         case 'GET_TRADES':
           const trades = await this.getStoredTrades();
-          sendResponse({ trades });
-          break;
+          return { success: true, trades };
 
         case 'UPDATE_TRADE':
           await this.updateTrade(message.tradeId, message.updates);
-          sendResponse({ success: true });
-          break;
+          return { success: true };
 
         case 'DELETE_TRADE':
           await this.deleteTrade(message.tradeId);
-          sendResponse({ success: true });
-          break;
+          return { success: true };
 
         case 'CLEAR_ALL_DATA':
           await this.clearAllData();
-          sendResponse({ success: true });
-          break;
+          return { success: true };
 
         case 'EXPORT_TRADES':
           const exportData = await this.exportTrades();
-          sendResponse(exportData);
-          break;
-
-        case 'PING':
-          sendResponse({ success: true, timestamp: Date.now() });
-          break;
+          return { success: true, data: exportData };
 
         default:
-          console.warn('Unknown message type:', message.type);
-          sendResponse({ error: 'Unknown message type' });
+          console.warn('⚠️ Unknown message type:', message.type);
+          return { success: false, error: 'Unknown message type' };
       }
     } catch (error) {
-      console.error('Background script error:', error);
-      sendResponse({ error: error.message });
+      console.error('❌ Background script error:', error);
+      return { success: false, error: error.message };
     }
   }
 
@@ -204,8 +246,8 @@ class ExtensionBackground {
     const newTrade = {
       id: tradeData.id || Date.now().toString(),
       timestamp: new Date().toISOString(),
-      url: tab.url,
-      tab_title: tab.title,
+      url: tab?.url || 'unknown',
+      tab_title: tab?.title || 'unknown',
       synced: false,
       ...tradeData
     };
@@ -220,14 +262,42 @@ class ExtensionBackground {
       try {
         await this.syncSingleTrade(newTrade);
       } catch (error) {
-        console.log('Auto-sync failed:', error);
+        console.log('❌ Auto-sync failed:', error);
       }
     }
     
-    console.log('Trade captured and stored:', newTrade);
+    console.log('✅ Trade captured and stored:', newTrade);
+  }
+
+  async toggleRecording(isRecording) {
+    const newRecordingState = isRecording !== undefined ? isRecording : !(await this.getRecordingStatus());
+    
+    await chrome.storage.local.set({ isRecording: newRecordingState });
+    console.log('🔄 Recording state changed to:', newRecordingState);
+    
+    // Notify all active tabs
+    const tabs = await chrome.tabs.query({});
+    const notificationPromises = tabs.map(async (tab) => {
+      try {
+        await this.sendMessageToTab(tab.id, {
+          type: 'RECORDING_STATUS_UPDATE',
+          isRecording: newRecordingState
+        });
+      } catch (error) {
+        // Tab might not have content script, ignore
+      }
+    });
+    
+    await Promise.allSettled(notificationPromises);
+    return newRecordingState;
   }
 
   async captureScreenshot(tabId) {
+    if (!tabId) {
+      console.error('❌ No tab ID provided for screenshot');
+      return null;
+    }
+
     try {
       const dataUrl = await chrome.tabs.captureVisibleTab({
         format: 'png',
@@ -245,26 +315,11 @@ class ExtensionBackground {
       screenshots.push(screenshot);
       await chrome.storage.local.set({ screenshots });
 
+      console.log('✅ Screenshot captured');
       return dataUrl;
     } catch (error) {
-      console.error('Screenshot capture failed:', error);
+      console.error('❌ Screenshot capture failed:', error);
       return null;
-    }
-  }
-
-  async toggleRecording(isRecording) {
-    await chrome.storage.local.set({ isRecording });
-    
-    const tabs = await chrome.tabs.query({});
-    for (const tab of tabs) {
-      try {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: 'TOGGLE_RECORDING',
-          isRecording
-        });
-      } catch (error) {
-        // Tab might not have content script, ignore
-      }
     }
   }
 
@@ -328,7 +383,7 @@ class ExtensionBackground {
         message: `${unsyncedTrades.length} trades synced successfully` 
       };
     } catch (error) {
-      console.error('Sync failed:', error);
+      console.error('❌ Sync failed:', error);
       throw new Error(`Sync failed: ${error.message}`);
     }
   }
@@ -370,10 +425,10 @@ class ExtensionBackground {
           t.id === trade.id ? { ...t, synced: true } : t
         );
         await chrome.storage.local.set({ trades: updatedTrades });
-        console.log('Single trade synced successfully');
+        console.log('✅ Single trade synced successfully');
       }
     } catch (error) {
-      console.log('Single trade sync failed:', error);
+      console.log('❌ Single trade sync failed:', error);
     }
   }
 
@@ -393,7 +448,7 @@ class ExtensionBackground {
 
   async clearAllData() {
     await chrome.storage.local.remove(['trades', 'screenshots']);
-    console.log('All trade data cleared');
+    console.log('✅ All trade data cleared');
   }
 
   async exportTrades() {
@@ -446,4 +501,5 @@ class ExtensionBackground {
 }
 
 // Initialize background script
+console.log('🚀 Initializing Replay Locker background script');
 new ExtensionBackground();

@@ -1,4 +1,3 @@
-
 // Enhanced popup functionality with comprehensive trade management
 class PopupController {
   constructor() {
@@ -6,15 +5,54 @@ class PopupController {
     this.trades = [];
     this.user = null;
     this.selectedTrade = null;
+    this.connectionRetries = 0;
+    this.maxRetries = 3;
     this.init();
   }
 
   async init() {
+    console.log('🚀 Initializing popup controller');
     await this.loadData();
     this.setupEventListeners();
+    await this.testConnection();
     this.updateUI();
     this.checkAuthStatus();
     this.setupAutoRefresh();
+  }
+
+  async testConnection() {
+    try {
+      console.log('🔌 Testing background connection...');
+      const response = await this.sendMessageWithRetry({ type: 'PING' });
+      if (response.success) {
+        console.log('✅ Background connection established');
+        this.showNotification('Extension ready', 'Connected successfully');
+      } else {
+        throw new Error('Ping failed');
+      }
+    } catch (error) {
+      console.error('❌ Background connection failed:', error);
+      this.showNotification('Connection Error', 'Extension may not work properly');
+    }
+  }
+
+  async sendMessageWithRetry(message, maxRetries = 3) {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const response = await chrome.runtime.sendMessage(message);
+        if (response) {
+          return response;
+        }
+        throw new Error('No response received');
+      } catch (error) {
+        console.log(`❌ Message attempt ${i + 1} failed:`, error.message);
+        if (i === maxRetries - 1) {
+          throw error;
+        }
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+      }
+    }
   }
 
   async loadData() {
@@ -24,65 +62,98 @@ class PopupController {
       this.isRecording = result.isRecording || false;
       this.user = result.user || null;
       this.settings = result.settings || {};
+      console.log('📊 Data loaded:', { trades: this.trades.length, isRecording: this.isRecording });
     } catch (error) {
-      console.error('Failed to load data:', error);
+      console.error('❌ Failed to load data:', error);
     }
   }
 
   setupEventListeners() {
     // Recording controls
-    document.getElementById('recordBtn').addEventListener('click', () => {
-      this.toggleRecording();
-    });
+    const recordBtn = document.getElementById('recordBtn');
+    if (recordBtn) {
+      recordBtn.addEventListener('click', () => {
+        console.log('🎯 Record button clicked');
+        this.toggleRecording();
+      });
+    }
 
     // Authentication
-    document.getElementById('authBtn').addEventListener('click', () => {
-      this.handleAuth();
-    });
+    const authBtn = document.getElementById('authBtn');
+    if (authBtn) {
+      authBtn.addEventListener('click', () => {
+        this.handleAuth();
+      });
+    }
 
     // Screenshot capture
-    document.getElementById('screenshotBtn').addEventListener('click', () => {
-      this.takeScreenshot();
-    });
+    const screenshotBtn = document.getElementById('screenshotBtn');
+    if (screenshotBtn) {
+      screenshotBtn.addEventListener('click', () => {
+        this.takeScreenshot();
+      });
+    }
 
     // Sync functionality
-    document.getElementById('syncBtn').addEventListener('click', () => {
-      this.syncTrades();
-    });
+    const syncBtn = document.getElementById('syncBtn');
+    if (syncBtn) {
+      syncBtn.addEventListener('click', () => {
+        this.syncTrades();
+      });
+    }
 
     // Settings
-    document.getElementById('settingsBtn').addEventListener('click', () => {
-      this.openSettings();
-    });
+    const settingsBtn = document.getElementById('settingsBtn');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', () => {
+        this.openSettings();
+      });
+    }
 
     // Help
-    document.getElementById('helpBtn').addEventListener('click', () => {
-      this.openHelp();
-    });
+    const helpBtn = document.getElementById('helpBtn');
+    if (helpBtn) {
+      helpBtn.addEventListener('click', () => {
+        this.openHelp();
+      });
+    }
 
     // Open web app
-    document.getElementById('openAppBtn').addEventListener('click', () => {
-      this.openWebApp();
-    });
+    const openAppBtn = document.getElementById('openAppBtn');
+    if (openAppBtn) {
+      openAppBtn.addEventListener('click', () => {
+        this.openWebApp();
+      });
+    }
 
     // Export data
-    document.getElementById('exportBtn').addEventListener('click', () => {
-      this.exportTrades();
-    });
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        this.exportTrades();
+      });
+    }
 
     // Clear data
-    document.getElementById('clearBtn').addEventListener('click', () => {
-      this.clearAllData();
-    });
+    const clearBtn = document.getElementById('clearBtn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        this.clearAllData();
+      });
+    }
 
     // Manual trade entry
-    document.getElementById('manualTradeBtn').addEventListener('click', () => {
-      this.showManualTradeForm();
-    });
+    const manualTradeBtn = document.getElementById('manualTradeBtn');
+    if (manualTradeBtn) {
+      manualTradeBtn.addEventListener('click', () => {
+        this.showManualTradeForm();
+      });
+    }
 
     // Listen for background messages
     chrome.runtime.onMessage.addListener((message) => {
-      if (message.type === 'TRADE_UPDATED') {
+      console.log('📨 Popup received message:', message.type);
+      if (message.type === 'TRADE_UPDATED' || message.type === 'RECORDING_STATUS_UPDATE') {
         this.loadData().then(() => this.updateUI());
       }
     });
@@ -97,25 +168,52 @@ class PopupController {
   }
 
   async toggleRecording() {
-    this.isRecording = !this.isRecording;
+    console.log('🔄 Toggling recording from:', this.isRecording);
     
     try {
-      await chrome.runtime.sendMessage({
-        type: 'TOGGLE_RECORDING',
-        isRecording: this.isRecording
-      });
+      const newState = !this.isRecording;
       
-      // Show notification
-      if (this.isRecording) {
-        this.showNotification('Recording started', 'Trade capture is now active');
+      // Show loading state
+      const recordBtn = document.getElementById('recordBtn');
+      const originalHTML = recordBtn.innerHTML;
+      recordBtn.innerHTML = '🔄 Updating...';
+      recordBtn.disabled = true;
+
+      const response = await this.sendMessageWithRetry({
+        type: 'TOGGLE_RECORDING',
+        isRecording: newState
+      });
+
+      if (response.success) {
+        this.isRecording = response.isRecording !== undefined ? response.isRecording : newState;
+        
+        // Show notification
+        if (this.isRecording) {
+          this.showNotification('Recording started', 'Trade capture is now active');
+        } else {
+          this.showNotification('Recording stopped', 'Trade capture is now inactive');
+        }
+        
+        console.log('✅ Recording toggled successfully to:', this.isRecording);
       } else {
-        this.showNotification('Recording stopped', 'Trade capture is now inactive');
+        throw new Error(response.error || 'Toggle failed');
       }
+      
+      // Restore button
+      recordBtn.innerHTML = originalHTML;
+      recordBtn.disabled = false;
       
       this.updateUI();
     } catch (error) {
-      console.error('Failed to toggle recording:', error);
-      this.showNotification('Error', 'Failed to toggle recording');
+      console.error('❌ Failed to toggle recording:', error);
+      this.showNotification('Error', 'Failed to toggle recording: ' + error.message);
+      
+      // Restore button
+      const recordBtn = document.getElementById('recordBtn');
+      if (recordBtn) {
+        recordBtn.disabled = false;
+        this.updateRecordingButton();
+      }
     }
   }
 
@@ -136,25 +234,25 @@ class PopupController {
   }
 
   async takeScreenshot() {
+    console.log('📸 Taking screenshot...');
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab) {
-        const screenshot = await chrome.runtime.sendMessage({
-          type: 'CAPTURE_SCREENSHOT'
-        });
+      const response = await this.sendMessageWithRetry({
+        type: 'CAPTURE_SCREENSHOT'
+      });
 
-        if (screenshot) {
-          this.showNotification('Screenshot captured', 'Screenshot saved successfully');
-          
-          // Optionally trigger manual trade capture
-          await this.captureManualTrade();
-        } else {
-          this.showNotification('Screenshot failed', 'Could not capture screenshot');
-        }
+      if (response.success && response.screenshot) {
+        this.showNotification('Screenshot captured', 'Screenshot saved successfully');
+        
+        // Optionally trigger manual trade capture
+        await this.captureManualTrade();
+        await this.loadData();
+        this.updateUI();
+      } else {
+        this.showNotification('Screenshot failed', 'Could not capture screenshot');
       }
     } catch (error) {
-      console.error('Screenshot failed:', error);
-      this.showNotification('Screenshot failed', 'Could not capture screenshot');
+      console.error('❌ Screenshot failed:', error);
+      this.showNotification('Screenshot failed', 'Could not capture screenshot: ' + error.message);
     }
   }
 
@@ -178,7 +276,7 @@ class PopupController {
 
     this.trades.push(tradeData);
     await chrome.storage.local.set({ trades: this.trades });
-    this.updateUI();
+    console.log('✅ Manual trade captured');
   }
 
   async syncTrades() {
@@ -188,19 +286,22 @@ class PopupController {
     }
 
     try {
+      console.log('🔄 Syncing trades...');
+      
       // Show syncing state
       const syncBtn = document.getElementById('syncBtn');
       const originalHTML = syncBtn.innerHTML;
       syncBtn.innerHTML = '<div class="spinner"></div>';
       syncBtn.disabled = true;
 
-      const result = await chrome.runtime.sendMessage({
+      const result = await this.sendMessageWithRetry({
         type: 'SYNC_TRADES'
       });
 
       if (result.success) {
         this.showNotification('Sync complete', result.message);
         await this.loadData();
+        console.log('✅ Sync completed successfully');
       } else {
         throw new Error(result.error || 'Sync failed');
       }
@@ -211,14 +312,16 @@ class PopupController {
       
       this.updateUI();
     } catch (error) {
-      console.error('Sync failed:', error);
+      console.error('❌ Sync failed:', error);
       this.showNotification('Sync failed', error.message || 'Could not sync trades');
       
       // Restore button
       const syncBtn = document.getElementById('syncBtn');
-      syncBtn.innerHTML = syncBtn.innerHTML.replace('<div class="spinner"></div>', 
-        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" stroke="currentColor" stroke-width="2"/></svg>');
-      syncBtn.disabled = false;
+      if (syncBtn) {
+        syncBtn.innerHTML = syncBtn.innerHTML.replace('<div class="spinner"></div>', 
+          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" stroke="currentColor" stroke-width="2"/></svg>');
+        syncBtn.disabled = false;
+      }
     }
   }
 
@@ -229,27 +332,29 @@ class PopupController {
     }
 
     try {
-      const exportData = await chrome.runtime.sendMessage({
+      const exportData = await this.sendMessageWithRetry({
         type: 'EXPORT_TRADES'
       });
 
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
-        type: 'application/json'
-      });
+      if (exportData.success) {
+        const blob = new Blob([JSON.stringify(exportData.data, null, 2)], {
+          type: 'application/json'
+        });
 
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `replay-locker-trades-${new Date().toISOString().split('T')[0]}.json`;
-      
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `replay-locker-trades-${new Date().toISOString().split('T')[0]}.json`;
+        
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
 
-      this.showNotification('Export complete', `${this.trades.length} trades exported`);
+        this.showNotification('Export complete', `${this.trades.length} trades exported`);
+      }
     } catch (error) {
-      console.error('Export failed:', error);
+      console.error('❌ Export failed:', error);
       this.showNotification('Export failed', 'Could not export trades');
     }
   }
@@ -257,7 +362,7 @@ class PopupController {
   async clearAllData() {
     if (confirm('Are you sure you want to clear all captured trades? This cannot be undone.')) {
       try {
-        await chrome.runtime.sendMessage({
+        await this.sendMessageWithRetry({
           type: 'CLEAR_ALL_DATA'
         });
         
@@ -265,7 +370,7 @@ class PopupController {
         this.updateUI();
         this.showNotification('Data cleared', 'All trade data has been removed');
       } catch (error) {
-        console.error('Clear data failed:', error);
+        console.error('❌ Clear data failed:', error);
         this.showNotification('Clear failed', 'Could not clear data');
       }
     }
@@ -465,6 +570,7 @@ class PopupController {
 
   updateRecordingButton() {
     const recordBtn = document.getElementById('recordBtn');
+    if (!recordBtn) return;
     
     if (this.isRecording) {
       recordBtn.innerHTML = '⏹️ Stop Recording';
@@ -485,16 +591,18 @@ class PopupController {
     const userEmail = document.getElementById('userEmail');
     const authBtn = document.getElementById('authBtn');
 
-    if (this.user) {
-      statusDot.className = 'status-dot';
-      userEmail.textContent = this.user.email;
-      authBtn.textContent = 'Sign Out';
-      authBtn.className = 'btn btn-secondary btn-small';
-    } else {
-      statusDot.className = 'status-dot offline';
-      userEmail.textContent = 'Not signed in';
-      authBtn.textContent = 'Sign In';
-      authBtn.className = 'btn btn-primary btn-small';
+    if (statusDot && userEmail && authBtn) {
+      if (this.user) {
+        statusDot.className = 'status-dot';
+        userEmail.textContent = this.user.email;
+        authBtn.textContent = 'Sign Out';
+        authBtn.className = 'btn btn-secondary btn-small';
+      } else {
+        statusDot.className = 'status-dot offline';
+        userEmail.textContent = 'Not signed in';
+        authBtn.textContent = 'Sign In';
+        authBtn.className = 'btn btn-primary btn-small';
+      }
     }
   }
 
@@ -502,7 +610,11 @@ class PopupController {
     const tradesList = document.getElementById('tradesList');
     const tradeCount = document.getElementById('tradeCount');
     
-    tradeCount.textContent = this.trades.length;
+    if (tradeCount) {
+      tradeCount.textContent = this.trades.length;
+    }
+
+    if (!tradesList) return;
 
     if (this.trades.length === 0) {
       tradesList.innerHTML = `
@@ -560,6 +672,8 @@ class PopupController {
 
   updateSyncStatus() {
     const syncStatus = document.getElementById('syncStatus');
+    if (!syncStatus) return;
+    
     const pendingTrades = this.trades.filter(trade => !trade.synced).length;
     
     if (pendingTrades > 0) {
@@ -620,7 +734,7 @@ class PopupController {
     const annotation = prompt('Add a tag/note for this trade:', trade.notes || '');
     if (annotation !== null) {
       try {
-        await chrome.runtime.sendMessage({
+        await this.sendMessageWithRetry({
           type: 'UPDATE_TRADE',
           tradeId: tradeId,
           updates: { notes: annotation }
@@ -630,7 +744,7 @@ class PopupController {
         this.updateUI();
         this.showNotification('Trade updated', 'Annotation saved');
       } catch (error) {
-        console.error('Failed to update trade:', error);
+        console.error('❌ Failed to update trade:', error);
         this.showNotification('Update failed', 'Could not save annotation');
       }
     }
@@ -639,7 +753,7 @@ class PopupController {
   async deleteTrade(tradeId) {
     if (confirm('Are you sure you want to delete this trade?')) {
       try {
-        await chrome.runtime.sendMessage({
+        await this.sendMessageWithRetry({
           type: 'DELETE_TRADE',
           tradeId: tradeId
         });
@@ -648,7 +762,7 @@ class PopupController {
         this.updateUI();
         this.showNotification('Trade deleted', 'Trade has been removed');
       } catch (error) {
-        console.error('Failed to delete trade:', error);
+        console.error('❌ Failed to delete trade:', error);
         this.showNotification('Delete failed', 'Could not delete trade');
       }
     }
@@ -674,5 +788,6 @@ let popupController;
 
 // Initialize popup when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('🚀 DOM loaded, initializing popup controller');
   popupController = new PopupController();
 });
