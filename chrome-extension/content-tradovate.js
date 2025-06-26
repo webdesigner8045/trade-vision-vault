@@ -1,4 +1,4 @@
-// Tradovate-specific content script with improved messaging
+// Tradovate-specific content script with improved messaging and domain handling
 (function() {
   'use strict';
 
@@ -7,8 +7,9 @@
     return;
   }
   window.replayLockerTradovateInjected = true;
+  window.replayLockerInjected = true; // Global flag for background script detection
 
-  console.log('🚀 Tradovate Replay Locker content script loaded');
+  console.log('🚀 Tradovate Replay Locker content script loaded on:', window.location.href);
 
   class TradovateCapture {
     constructor() {
@@ -17,11 +18,24 @@
       this.connectionRetries = 0;
       this.maxRetries = 5;
       this.messageListenerActive = false;
+      this.platform = this.detectPlatform();
       this.init();
     }
 
+    detectPlatform() {
+      const hostname = window.location.hostname;
+      if (hostname.includes('topstep.tradovate.com')) {
+        return 'Topstep Tradovate';
+      } else if (hostname.includes('trader.tradovate.com')) {
+        return 'Trader Tradovate';
+      } else if (hostname.includes('tradovate.com')) {
+        return 'Tradovate';
+      }
+      return 'Unknown Tradovate';
+    }
+
     async init() {
-      console.log('Initializing Tradovate capture...');
+      console.log(`Initializing ${this.platform} capture...`);
       
       // Register message listener first
       this.setupMessageListener();
@@ -35,15 +49,16 @@
       this.setupUI();
       this.setupTradeDetection();
       
-      console.log('✅ Tradovate capture initialized successfully');
+      console.log(`✅ ${this.platform} capture initialized successfully`);
     }
 
     async registerWithBackground() {
       try {
         const response = await this.sendMessage({ 
           type: 'CONTENT_SCRIPT_READY',
-          platform: 'Tradovate',
-          url: window.location.href
+          platform: this.platform,
+          url: window.location.href,
+          origin: window.location.origin
         });
         
         if (response && response.success) {
@@ -60,21 +75,23 @@
         return;
       }
 
+      // Enhanced message listener with better error handling
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        console.log('📨 Tradovate content script received message:', message);
+        console.log(`📨 ${this.platform} content script received message:`, message);
         
         try {
           if (message.type === 'RECORDING_STATUS_UPDATE') {
             this.isRecording = message.isRecording;
             this.updateUI();
-            sendResponse({ success: true, received: true });
+            sendResponse({ success: true, received: true, platform: this.platform });
           } else if (message.type === 'DIAGNOSTIC_PING') {
             sendResponse({
               success: true,
-              platform: 'Tradovate',
+              platform: this.platform,
               injected: true,
               recording: this.isRecording,
               url: window.location.href,
+              origin: window.location.origin,
               timestamp: Date.now(),
               messageListenerActive: this.messageListenerActive
             });
@@ -82,21 +99,22 @@
             sendResponse({
               success: true,
               pong: true,
-              platform: 'Tradovate'
+              platform: this.platform,
+              origin: window.location.origin
             });
           } else {
-            sendResponse({ success: false, error: 'Unknown message type' });
+            sendResponse({ success: false, error: 'Unknown message type', platform: this.platform });
           }
         } catch (error) {
           console.error('❌ Error handling message:', error);
-          sendResponse({ success: false, error: error.message });
+          sendResponse({ success: false, error: error.message, platform: this.platform });
         }
         
         return true;
       });
 
       this.messageListenerActive = true;
-      console.log('✅ Message listener registered for Tradovate');
+      console.log(`✅ Message listener registered for ${this.platform}`);
     }
 
     async establishConnection() {
@@ -187,7 +205,7 @@
       
       indicator.innerHTML = `
         <span style="display: inline-block; width: 8px; height: 8px; background: white; border-radius: 50%; margin-right: 6px; ${this.isRecording ? 'animation: pulse 1s infinite;' : ''}"></span>
-        ${this.isRecording ? 'Recording' : 'Paused'} | Tradovate
+        ${this.isRecording ? 'Recording' : 'Paused'} | ${this.platform}
       `;
       
       indicator.addEventListener('click', () => this.toggleRecording());
@@ -241,10 +259,11 @@
     }
 
     setupTradeDetection() {
-      console.log('🎯 Setting up Tradovate trade detection...');
+      console.log(`🎯 Setting up ${this.platform} trade detection...`);
       
-      // Enhanced Tradovate-specific selectors
+      // Enhanced selectors for different Tradovate platforms
       const tradovateSelectors = [
+        // Standard Tradovate selectors
         '[data-testid*="buy"]',
         '[data-testid*="sell"]',
         'button[title*="Buy"]',
@@ -254,10 +273,19 @@
         '[class*="buy-order"]',
         '[class*="sell-order"]',
         'button[aria-label*="Buy"]',
-        'button[aria-label*="Sell"]'
+        'button[aria-label*="Sell"]',
+        // Topstep specific selectors
+        '[data-qa="buy-button"]',
+        '[data-qa="sell-button"]',
+        'button[data-qa*="buy"]',
+        'button[data-qa*="sell"]',
+        '.order-entry-buy',
+        '.order-entry-sell',
+        'button[class*="Buy"]',
+        'button[class*="Sell"]'
       ];
       
-      // Set up click listeners with improved detection
+      // Enhanced click detection
       document.addEventListener('click', (event) => {
         if (!this.isRecording) return;
         
@@ -276,14 +304,19 @@
       // Monitor DOM changes for dynamic content
       this.setupDOMObserver();
       
-      // Monitor for order fills and position changes
-      this.monitorOrderFills();
+      console.log(`✅ Trade detection setup complete for ${this.platform}`);
     }
 
     findTradeButton(element, selectors) {
-      // Enhanced button detection logic
+      // Enhanced button detection logic for different Tradovate platforms
       for (let current = element; current && current !== document; current = current.parentElement) {
-        // Check data attributes
+        // Check data-qa attributes (Topstep specific)
+        const dataQa = current.getAttribute('data-qa');
+        if (dataQa && (dataQa.includes('buy') || dataQa.includes('sell'))) {
+          return current;
+        }
+        
+        // Check data-testid attributes
         if (current.dataset) {
           for (const key in current.dataset) {
             const value = current.dataset[key].toLowerCase();
@@ -301,22 +334,17 @@
           }
         }
         
-        // Check button text
+        // Check button text and labels
         if (current.tagName === 'BUTTON' || current.role === 'button') {
           const text = current.textContent?.toLowerCase() || '';
           const ariaLabel = current.getAttribute('aria-label')?.toLowerCase() || '';
+          const title = current.title?.toLowerCase() || '';
+          
           if (text.includes('buy') || text.includes('sell') || 
-              ariaLabel.includes('buy') || ariaLabel.includes('sell')) {
+              ariaLabel.includes('buy') || ariaLabel.includes('sell') ||
+              title.includes('buy') || title.includes('sell')) {
             return current;
           }
-        }
-        
-        // Check title and aria-label attributes
-        const title = current.title?.toLowerCase() || '';
-        const ariaLabel = current.getAttribute('aria-label')?.toLowerCase() || '';
-        if (title.includes('buy') || title.includes('sell') ||
-            ariaLabel.includes('buy') || ariaLabel.includes('sell')) {
-          return current;
         }
       }
       
@@ -327,17 +355,20 @@
       const timestamp = new Date();
       const buttonText = button.textContent?.trim() || '';
       const buttonTitle = button.title || '';
-      const direction = this.determineDirection(buttonText, buttonTitle, button);
+      const dataQa = button.getAttribute('data-qa') || '';
+      const direction = this.determineDirection(buttonText, buttonTitle, button, dataQa);
       
       console.log('📈 Capturing trade click:', {
         button: buttonText,
+        dataQa: dataQa,
         direction,
+        platform: this.platform,
         timestamp: timestamp.toISOString()
       });
       
       const tradeData = {
-        id: `tradovate-${Date.now()}`,
-        platform: 'Tradovate',
+        id: `${this.platform.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+        platform: this.platform,
         instrument: this.extractInstrument(),
         direction: direction,
         entry_price: this.extractPrice(),
@@ -346,7 +377,9 @@
         trigger: 'button_click',
         button_text: buttonText,
         button_title: buttonTitle,
+        data_qa: dataQa,
         page_url: window.location.href,
+        origin: window.location.origin,
         timestamp: timestamp.toISOString()
       };
       
@@ -354,8 +387,8 @@
       this.showTradeNotification(tradeData);
     }
 
-    determineDirection(text, title, button) {
-      const combined = (text + ' ' + title + ' ' + (button.className || '')).toLowerCase();
+    determineDirection(text, title, button, dataQa) {
+      const combined = (text + ' ' + title + ' ' + (button.className || '') + ' ' + dataQa).toLowerCase();
       
       if (combined.includes('buy') || combined.includes('long')) {
         return 'BUY';
@@ -549,7 +582,7 @@
         indicator.style.background = this.isRecording ? '#10b981' : '#6b7280';
         indicator.innerHTML = `
           <span style="display: inline-block; width: 8px; height: 8px; background: white; border-radius: 50%; margin-right: 6px; ${this.isRecording ? 'animation: pulse 1s infinite;' : ''}"></span>
-          ${this.isRecording ? 'Recording' : 'Paused'} | Tradovate
+          ${this.isRecording ? 'Recording' : 'Paused'} | ${this.platform}
         `;
       }
       
@@ -580,7 +613,7 @@
     try {
       captureSystem = new TradovateCapture();
     } catch (error) {
-      console.error('❌ Failed to initialize Tradovate capture:', error);
+      console.error(`❌ Failed to initialize ${window.location.hostname} capture:`, error);
       setTimeout(initCapture, 3000);
     }
   }

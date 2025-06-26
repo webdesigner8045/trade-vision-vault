@@ -1,3 +1,4 @@
+
 // Enhanced background service worker with improved messaging
 class ExtensionBackground {
   constructor() {
@@ -8,7 +9,7 @@ class ExtensionBackground {
     this.messageStats = { sent: 0, received: 0, errors: 0 };
     this.pendingInjections = new Set();
     
-    console.log('🚀 Background Script v2.2 starting...');
+    console.log('🚀 Background Script v2.3 starting...');
     this.initializeListeners();
     this.initializeSupabase();
     this.injectIntoExistingTabs();
@@ -118,6 +119,8 @@ class ExtensionBackground {
     const supportedDomains = [
       'tradingview.com',
       'tradovate.com',
+      'topstep.tradovate.com',
+      'trader.tradovate.com',
       'mt4web.com',
       'mt5web.com',
       'fxpro.com',
@@ -154,44 +157,57 @@ class ExtensionBackground {
         scriptFile = 'content-mt4.js';
       }
       
-      // Test if we can execute scripts on this tab
-      const testResult = await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => {
-          return { 
-            ready: true, 
-            url: window.location.href,
-            hasListener: !!window.replayLockerInjected
-          };
-        }
-      });
-      
-      console.log('🧪 Tab test result:', testResult[0]?.result);
-      
-      // Only inject if not already injected
-      if (!testResult[0]?.result?.hasListener) {
-        // Inject the content script
-        await chrome.scripting.executeScript({
+      // Test if we can execute scripts on this tab with improved error handling
+      try {
+        const testResult = await chrome.scripting.executeScript({
           target: { tabId },
-          files: [scriptFile]
+          func: () => {
+            return { 
+              ready: true, 
+              url: window.location.href,
+              origin: window.location.origin,
+              hasListener: !!window.replayLockerInjected
+            };
+          }
         });
         
-        console.log(`✅ ${scriptFile} injected successfully into tab ${tabId}`);
+        console.log('🧪 Tab test result:', testResult[0]?.result);
         
-        // Wait for content script to register
-        setTimeout(async () => {
-          if (this.injectedTabs.has(tabId)) {
-            // Send initial recording status
-            const isRecording = await this.getRecordingStatus();
-            await this.sendMessageToTab(tabId, {
-              type: 'RECORDING_STATUS_UPDATE',
-              isRecording: isRecording
-            });
-          }
-        }, 1500);
-      } else {
-        console.log(`ℹ️ Content script already present in tab ${tabId}`);
-        this.injectedTabs.add(tabId);
+        // Only inject if not already injected
+        if (!testResult[0]?.result?.hasListener) {
+          // Inject the content script
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: [scriptFile]
+          });
+          
+          console.log(`✅ ${scriptFile} injected successfully into tab ${tabId}`);
+          
+          // Wait for content script to register
+          setTimeout(async () => {
+            if (this.injectedTabs.has(tabId)) {
+              // Send initial recording status
+              const isRecording = await this.getRecordingStatus();
+              await this.sendMessageToTab(tabId, {
+                type: 'RECORDING_STATUS_UPDATE',
+                isRecording: isRecording
+              });
+            }
+          }, 1500);
+        } else {
+          console.log(`ℹ️ Content script already present in tab ${tabId}`);
+          this.injectedTabs.add(tabId);
+        }
+      } catch (scriptError) {
+        console.error(`❌ Script execution failed for tab ${tabId}:`, scriptError.message);
+        
+        // If it's a permissions error, try alternative injection method
+        if (scriptError.message.includes('Cannot access') || scriptError.message.includes('The extensions gallery')) {
+          console.log(`⚠️ Permissions issue detected, skipping tab ${tabId}`);
+          return;
+        }
+        
+        throw scriptError;
       }
       
     } catch (error) {
@@ -406,5 +422,5 @@ class ExtensionBackground {
 }
 
 // Initialize background script
-console.log('🚀 Initializing Background Script v2.2');
+console.log('🚀 Initializing Background Script v2.3');
 const backgroundInstance = new ExtensionBackground();
