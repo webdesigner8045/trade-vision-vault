@@ -1,3 +1,11 @@
+// Global error handler for popup
+window.addEventListener('error', (e) => {
+  console.error('🚨 Popup Error:', e.error?.message || e.message, e.filename, e.lineno);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('🚨 Popup Promise Rejection:', e.reason);
+});
 
 // Enhanced popup controller with improved connection handling
 class PopupController {
@@ -7,7 +15,19 @@ class PopupController {
     this.backgroundConnected = false;
     this.connectionRetries = 0;
     this.maxRetries = 5;
-    this.init();
+    
+    // Wrap initialization in try-catch
+    this.safeInit();
+  }
+
+  async safeInit() {
+    try {
+      console.log('📱 Initializing popup...');
+      await this.init();
+    } catch (error) {
+      console.error('❌ Popup initialization failed:', error);
+      this.handleError('Failed to initialize popup', error);
+    }
   }
 
   async init() {
@@ -457,12 +477,49 @@ class PopupController {
   }
 }
 
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
+// Safe initialization with better error handling
+function initializePopup() {
+  try {
+    console.log('🚀 Starting popup initialization...');
+    
+    // Check if chrome.runtime is available
+    if (!chrome || !chrome.runtime) {
+      throw new Error('Chrome runtime not available');
+    }
+    
+    // Initialize popup controller
     window.popupController = new PopupController();
-  });
+    console.log('✅ Popup controller created');
+    
+  } catch (error) {
+    console.error('❌ Failed to initialize popup:', error);
+    
+    // Show error in the UI
+    const container = document.querySelector('.popup-container');
+    if (container) {
+      container.innerHTML = `
+        <div style="padding: 20px; text-align: center; color: #dc2626;">
+          <h3>Extension Error</h3>
+          <p>Failed to initialize: ${error.message}</p>
+          <button onclick="location.reload()" style="padding: 8px 16px; margin-top: 10px;">Retry</button>
+        </div>
+      `;
+    }
+  }
+}
+
+// Initialize when DOM is ready with multiple fallbacks
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializePopup);
 } else {
   // DOM is already loaded
-  window.popupController = new PopupController();
+  setTimeout(initializePopup, 100);
 }
+
+// Fallback initialization after a delay
+setTimeout(() => {
+  if (!window.popupController) {
+    console.log('🔄 Fallback initialization...');
+    initializePopup();
+  }
+}, 1000);
