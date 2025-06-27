@@ -14,6 +14,7 @@
       this.platform = 'Tradovate';
       this.activeTrades = new Map();
       this.lastTradeTime = 0;
+      this.recordingStatus = null;
       this.init();
     }
 
@@ -23,6 +24,7 @@
       try {
         await this.registerWithBackground();
         this.setupTradeDetection();
+        this.createStatusUI();
         this.createTestUI();
         
         console.log('✅ Tradovate capture initialized successfully');
@@ -90,13 +92,14 @@
         }
       }, true);
 
-      // Monitor for trade confirmations
+      // Monitor for trade confirmations and position changes
       const observer = new MutationObserver((mutations) => {
         mutations.forEach((mutation) => {
           if (mutation.type === 'childList') {
             mutation.addedNodes.forEach((node) => {
               if (node.nodeType === Node.ELEMENT_NODE) {
                 this.checkForTradeConfirmations(node);
+                this.checkForPositionUpdates(node);
               }
             });
           }
@@ -107,6 +110,11 @@
         childList: true,
         subtree: true
       });
+
+      // Monitor position changes every 2 seconds
+      setInterval(() => {
+        this.monitorPositions();
+      }, 2000);
     }
 
     findTradeButton(element) {
@@ -120,7 +128,8 @@
         // Check for trade-related classes
         const classes = current.className?.toLowerCase() || '';
         if (classes.includes('buy') || classes.includes('sell') || 
-            classes.includes('trade') || classes.includes('order')) {
+            classes.includes('trade') || classes.includes('order') ||
+            classes.includes('position')) {
           return current;
         }
         
@@ -129,7 +138,8 @@
           const text = current.textContent?.toLowerCase() || '';
           if (text.includes('buy') || text.includes('sell') || 
               text.includes('market') || text.includes('limit') ||
-              text.includes('submit') || text.includes('place')) {
+              text.includes('submit') || text.includes('place') ||
+              text.includes('close') || text.includes('flatten')) {
             return current;
           }
         }
@@ -142,10 +152,63 @@
       
       // Look for trade confirmation messages
       if (text.includes('order filled') || text.includes('trade executed') ||
-          text.includes('position opened') || text.includes('order confirmed')) {
+          text.includes('position opened') || text.includes('order confirmed') ||
+          text.includes('buy order') || text.includes('sell order')) {
         console.log('🎯 Trade confirmation detected');
         this.handleTradeConfirmation(element);
       }
+    }
+
+    checkForPositionUpdates(element) {
+      // Look for position-related elements
+      const classes = element.className?.toLowerCase() || '';
+      if (classes.includes('position') || classes.includes('pnl') || classes.includes('unrealized')) {
+        this.detectPositionChange();
+      }
+    }
+
+    monitorPositions() {
+      // Monitor position tables and P&L displays
+      const positionElements = document.querySelectorAll(
+        '[class*="position"], [class*="pnl"], [data-qa*="position"], .portfolio, .account-summary'
+      );
+      
+      if (positionElements.length > 0) {
+        this.detectPositionChange();
+      }
+    }
+
+    detectPositionChange() {
+      // Simple position detection - if we see positions and no active recording, start one
+      const hasPositions = this.hasOpenPositions();
+      
+      if (hasPositions && this.activeTrades.size === 0) {
+        this.handleTradeOpened({
+          id: `auto-trade-${Date.now()}`,
+          direction: 'AUTO',
+          instrument: this.getCurrentInstrument(),
+          entry_price: this.getCurrentPrice()
+        });
+      } else if (!hasPositions && this.activeTrades.size > 0) {
+        // Position closed, stop recording
+        const trade = Array.from(this.activeTrades.values())[0];
+        this.handleTradeClosed({
+          ...trade,
+          exit_price: this.getCurrentPrice()
+        });
+      }
+    }
+
+    hasOpenPositions() {
+      // Look for indicators of open positions
+      const positionIndicators = document.querySelectorAll(
+        '[class*="position"]:not([class*="zero"]):not([class*="empty"]), ' +
+        '[data-qa*="position"]:not([data-qa*="zero"]), ' +
+        '.portfolio [class*="quantity"]:not(:empty), ' +
+        '.account-summary [class*="pnl"]:not([class*="zero"])'
+      );
+      
+      return positionIndicators.length > 0;
     }
 
     async handleTradeAction(button, event) {
@@ -175,7 +238,6 @@
     }
 
     async handleTradeConfirmation(element) {
-      // This handles automatic trade detection from confirmation messages
       const text = element.textContent?.toLowerCase() || '';
       
       if (text.includes('position opened') || text.includes('order filled')) {
@@ -197,7 +259,7 @@
         return 'SELL';
       }
       
-      return 'UNKNOWN';
+      return 'AUTO';
     }
 
     determineActionType(text, button) {
@@ -211,28 +273,50 @@
     }
 
     getCurrentInstrument() {
-      // Try to find the current instrument being traded
-      const instrumentElements = document.querySelectorAll('[data-qa*="symbol"], .symbol, .instrument');
-      for (const element of instrumentElements) {
-        const text = element.textContent?.trim();
-        if (text && text.length < 10) { // Likely an instrument symbol
-          return text;
+      // Try multiple ways to find the current instrument
+      const selectors = [
+        '[data-qa*="symbol"]',
+        '[class*="symbol"]',
+        '[class*="instrument"]',
+        '.contract-selector',
+        '.symbol-display'
+      ];
+      
+      for (const selector of selectors) {
+        const elements = document.querySelectorAll(selector);
+        for (const element of elements) {
+          const text = element.textContent?.trim();
+          if (text && text.length < 10 && /^[A-Z0-9]+$/.test(text)) {
+            return text;
+          }
         }
       }
-      return 'UNKNOWN';
+      
+      return 'ES'; // Default fallback
     }
 
     getCurrentPrice() {
-      // Try to find the current price
-      const priceElements = document.querySelectorAll('[data-qa*="price"], .price, .last-price');
-      for (const element of priceElements) {
-        const text = element.textContent?.trim();
-        const price = parseFloat(text?.replace(/[^0-9.-]/g, ''));
-        if (!isNaN(price)) {
-          return price;
+      // Try to find the current market price
+      const priceSelectors = [
+        '[data-qa*="price"]',
+        '[class*="price"]',
+        '[class*="last"]',
+        '[class*="market"]',
+        '.price-display'
+      ];
+      
+      for (const selector of priceSelectors) {
+        const elements = document.querySelectorAll(selector);
+        for (const element of elements) {
+          const text = element.textContent?.trim();
+          const price = parseFloat(text?.replace(/[^0-9.-]/g, ''));
+          if (!isNaN(price) && price > 0) {
+            return price;
+          }
         }
       }
-      return 0;
+      
+      return 4500; // Default fallback
     }
 
     async handleTradeOpened(tradeData) {
@@ -250,11 +334,13 @@
         });
 
         if (response?.success) {
+          this.updateRecordingStatus('recording', `🎥 Recording: ${tradeData.direction} ${tradeData.instrument}`);
           this.showNotification(`🎥 Recording started: ${tradeData.direction} ${tradeData.instrument}`, 'success');
         }
 
       } catch (error) {
         console.error('❌ Error handling trade opened:', error);
+        this.showNotification(`❌ Failed to start recording: ${error.message}`, 'error');
       }
     }
 
@@ -265,7 +351,7 @@
         // Find the matching open trade
         let closedTrade = null;
         for (const [id, trade] of this.activeTrades.entries()) {
-          if (trade.direction === tradeData.direction) {
+          if (trade.direction === tradeData.direction || tradeData.direction === 'AUTO') {
             closedTrade = { ...trade, ...tradeData };
             this.activeTrades.delete(id);
             break;
@@ -285,12 +371,62 @@
         });
 
         if (response?.success) {
+          this.updateRecordingStatus('idle', '✅ Ready to record');
           this.showNotification(`✅ Trade saved: ${closedTrade.direction} ${closedTrade.instrument}`, 'success');
+          
+          // Notify the web app
+          window.postMessage({ type: 'TRADE_RECORDED', data: closedTrade }, '*');
         }
 
       } catch (error) {
         console.error('❌ Error handling trade closed:', error);
+        this.showNotification(`❌ Failed to save trade: ${error.message}`, 'error');
       }
+    }
+
+    createStatusUI() {
+      const statusContainer = document.createElement('div');
+      statusContainer.id = 'recording-status';
+      statusContainer.style.cssText = `
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        z-index: 999999;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        font-weight: 600;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      `;
+      
+      statusContainer.textContent = '🔄 Initializing...';
+      document.body.appendChild(statusContainer);
+      
+      this.recordingStatus = statusContainer;
+      
+      // Update to ready state after initialization
+      setTimeout(() => {
+        this.updateRecordingStatus('idle', '✅ Ready to record');
+      }, 2000);
+    }
+
+    updateRecordingStatus(state, message) {
+      if (!this.recordingStatus) return;
+      
+      this.recordingStatus.textContent = message;
+      
+      // Update colors based on state
+      const colors = {
+        idle: 'rgba(34, 197, 94, 0.2)',
+        recording: 'rgba(239, 68, 68, 0.2)',
+        processing: 'rgba(251, 191, 36, 0.2)'
+      };
+      
+      this.recordingStatus.style.background = colors[state] || 'rgba(0, 0, 0, 0.8)';
     }
 
     createTestUI() {
@@ -303,38 +439,44 @@
         z-index: 999999;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 8px;
         font-family: Arial, sans-serif;
       `;
 
       // Test trade open button
       const openBtn = document.createElement('button');
-      openBtn.textContent = '🎥 Test Trade Open';
+      openBtn.textContent = '🎥 Test Open Trade';
       openBtn.style.cssText = `
         background: #10b981;
         color: white;
-        padding: 10px 15px;
+        padding: 8px 12px;
         border: none;
         border-radius: 6px;
-        font-size: 14px;
+        font-size: 12px;
         cursor: pointer;
         font-weight: 600;
+        transition: background 0.2s;
       `;
+      openBtn.onmouseover = () => openBtn.style.background = '#059669';
+      openBtn.onmouseout = () => openBtn.style.background = '#10b981';
       openBtn.onclick = () => this.simulateTradeOpen();
 
       // Test trade close button
       const closeBtn = document.createElement('button');
-      closeBtn.textContent = '🛑 Test Trade Close';
+      closeBtn.textContent = '🛑 Test Close Trade';
       closeBtn.style.cssText = `
         background: #dc2626;
         color: white;
-        padding: 10px 15px;
+        padding: 8px 12px;
         border: none;
         border-radius: 6px;
-        font-size: 14px;
+        font-size: 12px;
         cursor: pointer;
         font-weight: 600;
+        transition: background 0.2s;
       `;
+      closeBtn.onmouseover = () => closeBtn.style.background = '#b91c1c';
+      closeBtn.onmouseout = () => closeBtn.style.background = '#dc2626';
       closeBtn.onclick = () => this.simulateTradeClose();
 
       container.appendChild(openBtn);
@@ -347,7 +489,7 @@
         id: `test-trade-${Date.now()}`,
         direction: 'BUY',
         instrument: 'ES',
-        entry_price: 4500
+        entry_price: 4500.25
       });
     }
 
@@ -356,7 +498,7 @@
         const trade = Array.from(this.activeTrades.values())[0];
         await this.handleTradeClosed({
           ...trade,
-          exit_price: trade.entry_price + 10
+          exit_price: trade.entry_price + (Math.random() > 0.5 ? 10 : -8)
         });
       } else {
         this.showNotification('No active trades to close', 'warning');
@@ -367,7 +509,7 @@
       const notification = document.createElement('div');
       notification.style.cssText = `
         position: fixed;
-        top: 20px;
+        top: 60px;
         right: 20px;
         z-index: 999999;
         background: ${type === 'success' ? '#10b981' : type === 'error' ? '#dc2626' : '#f59e0b'};
@@ -380,14 +522,24 @@
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         max-width: 300px;
         word-wrap: break-word;
+        backdrop-filter: blur(10px);
+        transform: translateX(100%);
+        transition: transform 0.3s ease-out;
       `;
       
       notification.textContent = message;
       document.body.appendChild(notification);
       
+      // Animate in
       setTimeout(() => {
-        notification.remove();
-      }, 4000);
+        notification.style.transform = 'translateX(0)';
+      }, 100);
+      
+      // Animate out and remove
+      setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => notification.remove(), 300);
+      }, 3700);
     }
   }
 
