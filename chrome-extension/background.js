@@ -73,6 +73,16 @@ class ExtensionBackground {
           return true;
         }
 
+        if (message.type === 'CAPTURE_SCREENSHOT') {
+          this.handleCaptureScreenshot(message, sender).then(result => {
+            sendResponse(result);
+          }).catch(error => {
+            console.error('❌ Screenshot error:', error);
+            sendResponse({ success: false, error: error.message });
+          });
+          return true;
+        }
+
         this.handleAsyncMessage(message, sender).then(result => {
           sendResponse(result);
         }).catch(error => {
@@ -203,6 +213,91 @@ class ExtensionBackground {
       this.isRecording = false;
       chrome.action.setBadgeText({ text: '!' });
       chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+      return { success: false, error: error.message };
+    }
+  }
+
+  async handleCaptureScreenshot(message, sender) {
+    try {
+      const tabId = message.tabId || sender.tab?.id;
+      if (!tabId) throw new Error('No tab ID available');
+
+      console.log('📸 Capturing screenshot for tab:', tabId);
+
+      // Capture the visible tab
+      const screenshotDataUrl = await chrome.tabs.captureVisibleTab(
+        sender.tab?.windowId,
+        { format: 'png', quality: 90 }
+      );
+
+      if (!screenshotDataUrl) {
+        throw new Error('Failed to capture screenshot');
+      }
+
+      // Convert data URL to blob
+      const screenshotBlob = this.dataURLtoBlob(screenshotDataUrl);
+      
+      // Upload screenshot to Supabase
+      const uploadResult = await this.uploadScreenshot(screenshotBlob, {
+        reason: message.reason || 'manual',
+        tabId: tabId,
+        timestamp: Date.now()
+      });
+
+      if (uploadResult.success) {
+        console.log('✅ Screenshot uploaded successfully');
+        return { success: true, url: uploadResult.url };
+      } else {
+        throw new Error('Failed to upload screenshot');
+      }
+
+    } catch (error) {
+      console.error('❌ Screenshot capture error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async uploadScreenshot(screenshotBlob, metadata) {
+    try {
+      // Get current user session
+      const session = await chrome.storage.local.get('supabase_session');
+      if (!session.supabase_session) {
+        throw new Error('User not authenticated');
+      }
+
+      const userId = session.supabase_session.user.id;
+      const fileName = `screenshot-${Date.now()}.png`;
+      
+      console.log(`📤 Uploading screenshot: ${fileName}, size: ${screenshotBlob.size} bytes`);
+      
+      // Upload screenshot to Supabase Storage
+      const formData = new FormData();
+      formData.append('file', screenshotBlob, fileName);
+
+      const uploadResponse = await fetch(
+        `${this.supabaseUrl}/storage/v1/object/trade-files/${userId}/${fileName}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.supabase_session.access_token}`,
+          },
+          body: formData
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        throw new Error(`Screenshot upload failed: ${errorText}`);
+      }
+
+      const screenshotUrl = `${this.supabaseUrl}/storage/v1/object/public/trade-files/${userId}/${fileName}`;
+      
+      console.log('✅ Screenshot uploaded successfully:', screenshotUrl);
+      
+      return { success: true, url: screenshotUrl };
+
+    } catch (error) {
+      console.error('❌ Error uploading screenshot:', error);
       return { success: false, error: error.message };
     }
   }
