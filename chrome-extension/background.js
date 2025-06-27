@@ -275,6 +275,8 @@ class ExtensionBackground {
   }
 
   async captureScreenshot(tabId, reason = 'manual') {
+    console.log(`📸 Capturing screenshot for tab ${tabId} (reason: ${reason})`);
+    
     if (!tabId) {
       console.error('❌ No tab ID provided for screenshot');
       throw new Error('No tab ID provided');
@@ -285,24 +287,37 @@ class ExtensionBackground {
         throw new Error('Screenshot API not available');
       }
 
-      console.log(`📸 Capturing screenshot for tab ${tabId} (reason: ${reason})`);
+      // Get tab info first
+      const tab = await chrome.tabs.get(tabId);
+      console.log('📸 Tab info:', tab.url, tab.title);
       
       // Make sure the tab is active and visible
-      const tab = await chrome.tabs.get(tabId);
       if (!tab.active) {
+        console.log('📸 Making tab active for screenshot...');
         await chrome.tabs.update(tabId, { active: true });
-        // Wait longer for tab to become active when triggered by trade
-        await new Promise(resolve => setTimeout(resolve, reason === 'trade_detected' ? 500 : 100));
+        // Wait for tab to become active
+        await new Promise(resolve => setTimeout(resolve, reason === 'trade_detected' ? 1000 : 500));
       }
       
-      const dataUrl = await chrome.tabs.captureVisibleTab({
+      // Get the window info to ensure it's focused
+      const window = await chrome.windows.get(tab.windowId);
+      if (!window.focused) {
+        console.log('📸 Focusing window for screenshot...');
+        await chrome.windows.update(tab.windowId, { focused: true });
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      
+      console.log('📸 Attempting to capture visible tab...');
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
         format: 'png',
-        quality: 90 // Higher quality for trade screenshots
+        quality: 90
       });
       
       if (!dataUrl) {
         throw new Error('Screenshot capture returned empty result');
       }
+      
+      console.log('📸 Screenshot captured successfully, size:', dataUrl.length);
       
       // Store the screenshot with enhanced metadata
       const screenshots = await this.getStoredScreenshots();
@@ -313,7 +328,8 @@ class ExtensionBackground {
         tabId: tabId,
         reason: reason,
         url: tab.url,
-        title: tab.title
+        title: tab.title,
+        windowId: tab.windowId
       };
       
       screenshots.push(newScreenshot);
@@ -325,7 +341,7 @@ class ExtensionBackground {
       
       await chrome.storage.local.set({ screenshots });
       
-      console.log('✅ Screenshot captured and stored successfully');
+      console.log('✅ Screenshot stored successfully');
       return dataUrl;
     } catch (error) {
       console.error('❌ Screenshot failed:', error);
@@ -334,6 +350,8 @@ class ExtensionBackground {
         throw new Error('Cannot capture screenshot - tab may not be visible or accessible');
       } else if (error.message.includes('not available')) {
         throw new Error('Screenshot API not available');
+      } else if (error.message.includes('No tab with id')) {
+        throw new Error('Tab not found - it may have been closed');
       } else {
         throw new Error(`Screenshot failed: ${error.message}`);
       }

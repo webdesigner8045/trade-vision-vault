@@ -1,4 +1,3 @@
-
 class PopupController {
   constructor() {
     this.isRecording = false;
@@ -6,6 +5,7 @@ class PopupController {
     this.backgroundConnected = false;
     this.contextInvalidated = false;
     this.trades = [];
+    this.debugMode = true; // Enable debug logging
     
     this.init();
   }
@@ -22,6 +22,9 @@ class PopupController {
       this.setupEventListeners();
       this.showLoadingState();
       
+      // Add debug info
+      this.showDebugInfo();
+      
       await this.connectToBackground();
       
       if (this.backgroundConnected) {
@@ -36,6 +39,37 @@ class PopupController {
       console.error('❌ Popup init failed:', error);
       this.handleError('Initialization failed', error);
     }
+  }
+
+  showDebugInfo() {
+    const debugInfo = document.createElement('div');
+    debugInfo.id = 'debugInfo';
+    debugInfo.style.cssText = `
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      right: 10px;
+      background: #1f2937;
+      color: #d1d5db;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      z-index: 1000;
+    `;
+    
+    const currentUrl = window.location.href;
+    const chromeVersion = navigator.userAgent.match(/Chrome\/(\d+)/)?.[1] || 'unknown';
+    
+    debugInfo.innerHTML = `
+      <strong>Debug Info:</strong><br>
+      Extension ID: ${chrome?.runtime?.id || 'N/A'}<br>
+      Chrome Version: ${chromeVersion}<br>
+      URL: ${currentUrl}<br>
+      Context Valid: ${this.isExtensionContextValid()}<br>
+      Background Connected: ${this.backgroundConnected}
+    `;
+    
+    document.body.appendChild(debugInfo);
   }
 
   isExtensionContextValid() {
@@ -137,7 +171,7 @@ class PopupController {
         return;
       }
 
-      console.log('📤 Sending message:', message.type);
+      console.log('📤 Sending message:', message.type, message);
 
       const timeoutId = setTimeout(() => {
         reject(new Error(`Message timeout after ${timeout}ms`));
@@ -207,85 +241,144 @@ class PopupController {
   }
 
   setupEventListeners() {
+    console.log('🔧 Setting up event listeners...');
+    
     const recordBtn = document.getElementById('recordBtn');
     if (recordBtn) {
-      recordBtn.addEventListener('click', () => this.toggleRecording());
+      recordBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('🔴 Record button clicked');
+        this.toggleRecording();
+      });
+      console.log('✅ Record button listener added');
+    } else {
+      console.error('❌ Record button not found');
     }
 
     const screenshotBtn = document.getElementById('screenshotBtn');
     if (screenshotBtn) {
-      screenshotBtn.addEventListener('click', () => this.captureScreenshot());
+      screenshotBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('📸 Screenshot button clicked');
+        this.captureScreenshot();
+      });
+      console.log('✅ Screenshot button listener added');
     }
 
     const manualTradeBtn = document.getElementById('manualTradeBtn');
     if (manualTradeBtn) {
-      manualTradeBtn.addEventListener('click', () => this.addManualTrade());
+      manualTradeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('➕ Manual trade button clicked');
+        this.addManualTrade();
+      });
+      console.log('✅ Manual trade button listener added');
     }
 
     const settingsBtn = document.getElementById('settingsBtn');
     if (settingsBtn) {
-      settingsBtn.addEventListener('click', () => this.openSettings());
+      settingsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('⚙️ Settings button clicked');
+        this.openSettings();
+      });
     }
 
     const authBtn = document.getElementById('authBtn');
     if (authBtn) {
-      authBtn.addEventListener('click', () => this.handleAuth());
+      authBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('🔐 Auth button clicked');
+        this.handleAuth();
+      });
     }
 
     const syncBtn = document.getElementById('syncBtn');
     if (syncBtn) {
-      syncBtn.addEventListener('click', () => this.syncTrades());
+      syncBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('🔄 Sync button clicked');
+        this.syncTrades();
+      });
     }
 
     const openAppBtn = document.getElementById('openAppBtn');
     if (openAppBtn) {
-      openAppBtn.addEventListener('click', () => this.openWebApp());
+      openAppBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('🌐 Open app button clicked');
+        this.openWebApp();
+      });
     }
 
     const exportBtn = document.getElementById('exportBtn');
     if (exportBtn) {
-      exportBtn.addEventListener('click', () => this.exportData());
+      exportBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('📥 Export button clicked');
+        this.exportData();
+      });
     }
 
     const helpBtn = document.getElementById('helpBtn');
     if (helpBtn) {
-      helpBtn.addEventListener('click', () => this.showHelp());
+      helpBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('❓ Help button clicked');
+        this.showHelp();
+      });
     }
 
     const clearBtn = document.getElementById('clearBtn');
     if (clearBtn) {
-      clearBtn.addEventListener('click', () => this.clearData());
+      clearBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('🗑️ Clear button clicked');
+        this.clearData();
+      });
     }
+
+    console.log('✅ All event listeners setup complete');
   }
 
   async toggleRecording() {
+    console.log('🔄 Toggle recording called, current state:', this.isRecording);
+    
     if (this.contextInvalidated) {
       this.showStatus('Extension context lost - please reopen popup', 'error');
       return;
     }
 
     if (!this.backgroundConnected) {
-      this.showStatus('Background script not connected', 'error');
-      return;
+      console.log('❌ Background not connected, attempting to reconnect...');
+      try {
+        await this.connectToBackground();
+      } catch (error) {
+        this.showStatus('Failed to connect to background script', 'error');
+        return;
+      }
     }
 
     try {
       this.setButtonLoading('recordBtn', true);
+      this.showStatus('Toggling recording...', 'info');
       
       const response = await this.sendMessage({
         type: 'TOGGLE_RECORDING',
         isRecording: !this.isRecording
       });
 
+      console.log('📊 Toggle recording response:', response);
+
       if (response?.success) {
         this.isRecording = response.isRecording;
         this.updateUI();
-        this.showStatus(`Recording ${this.isRecording ? 'started' : 'stopped'}`, 'success');
+        this.showStatus(`Recording ${this.isRecording ? 'STARTED' : 'STOPPED'}`, 'success');
         
         // Reload trades after toggling recording
         await this.loadTrades();
       } else {
-        throw new Error('Toggle recording failed');
+        throw new Error(response?.error || 'Toggle recording failed');
       }
     } catch (error) {
       console.error('❌ Toggle error:', error);
@@ -301,24 +394,45 @@ class PopupController {
   }
 
   async captureScreenshot() {
+    console.log('📸 Capture screenshot called');
+    
     if (this.contextInvalidated) {
       this.showStatus('Extension context lost - please reopen popup', 'error');
       return;
     }
 
     if (!this.backgroundConnected) {
+      console.log('❌ Background not connected for screenshot');
       this.showStatus('Background script not connected', 'error');
       return;
     }
 
     try {
       this.setButtonLoading('screenshotBtn', true);
-      const response = await this.sendMessage({ type: 'CAPTURE_SCREENSHOT' });
+      this.showStatus('Capturing screenshot...', 'info');
+      
+      // First get the active tab
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const activeTab = tabs[0];
+      
+      if (!activeTab) {
+        throw new Error('No active tab found');
+      }
+      
+      console.log('📸 Active tab:', activeTab.url);
+      
+      const response = await this.sendMessage({ 
+        type: 'CAPTURE_SCREENSHOT',
+        reason: 'manual',
+        tabId: activeTab.id
+      });
+      
+      console.log('📸 Screenshot response:', response);
       
       if (response?.success) {
         this.showStatus('Screenshot captured successfully!', 'success');
       } else {
-        throw new Error(response?.error || 'Capture failed');
+        throw new Error(response?.error || 'Screenshot capture failed');
       }
     } catch (error) {
       console.error('❌ Screenshot error:', error);
@@ -334,47 +448,65 @@ class PopupController {
   }
 
   async addManualTrade() {
+    console.log('➕ Add manual trade called');
+    
     if (!this.backgroundConnected) {
       this.showStatus('Background script not connected', 'error');
       return;
     }
 
     try {
-      // Simple manual trade entry
+      this.setButtonLoading('manualTradeBtn', true);
+      this.showStatus('Adding manual trade...', 'info');
+      
+      // Get current tab info
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const activeTab = tabs[0];
+      
       const tradeData = {
         id: `manual-${Date.now()}`,
-        platform: 'Manual',
-        direction: 'BUY', // Default, user can modify later
+        platform: 'Manual Entry',
+        direction: 'BUY',
         trade_date: new Date().toISOString().split('T')[0],
         trade_time: new Date().toTimeString().split(' ')[0],
         trigger: 'manual_entry',
-        page_url: 'manual',
+        page_url: activeTab?.url || 'manual',
+        page_title: activeTab?.title || 'Manual Trade',
         timestamp: new Date().toISOString(),
-        notes: 'Manual trade entry'
+        notes: 'Manual trade entry from popup'
       };
+
+      console.log('➕ Manual trade data:', tradeData);
 
       const response = await this.sendMessage({
         type: 'TRADE_DETECTED',
         data: tradeData
       });
 
+      console.log('➕ Manual trade response:', response);
+
       if (response?.success) {
         this.showStatus('Manual trade added successfully!', 'success');
         await this.loadTrades();
       } else {
-        throw new Error('Failed to add manual trade');
+        throw new Error(response?.error || 'Failed to add manual trade');
       }
     } catch (error) {
+      console.error('❌ Manual trade error:', error);
       this.handleError('Failed to add manual trade', error);
+    } finally {
+      this.setButtonLoading('manualTradeBtn', false);
     }
   }
 
   handleAuth() {
-    // For now, just show that auth is not implemented
+    console.log('🔐 Auth handler called');
     this.showStatus('Authentication feature coming soon', 'info');
   }
 
   async syncTrades() {
+    console.log('🔄 Sync trades called');
+    
     if (!this.backgroundConnected) {
       this.showStatus('Background script not connected', 'error');
       return;
@@ -382,12 +514,13 @@ class PopupController {
 
     try {
       this.setButtonLoading('syncBtn', true);
+      this.showStatus('Syncing trades...', 'info');
       
-      // For now, just reload trades
       await this.loadTrades();
-      this.showStatus('Trades synced successfully!', 'success');
+      this.showStatus(`Trades synced! Found ${this.trades.length} trades`, 'success');
       
     } catch (error) {
+      console.error('❌ Sync error:', error);
       this.handleError('Sync failed', error);
     } finally {
       this.setButtonLoading('syncBtn', false);
@@ -395,25 +528,47 @@ class PopupController {
   }
 
   openSettings() {
-    if (chrome?.tabs?.create) {
-      chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
+    console.log('⚙️ Opening settings');
+    try {
+      if (chrome?.tabs?.create) {
+        chrome.tabs.create({ url: chrome.runtime.getURL('settings.html') });
+      } else {
+        this.showStatus('Cannot open settings - Chrome tabs API not available', 'error');
+      }
+    } catch (error) {
+      console.error('❌ Settings error:', error);
+      this.showStatus('Failed to open settings', 'error');
     }
   }
 
   openWebApp() {
-    if (chrome?.tabs?.create) {
-      chrome.tabs.create({ url: 'https://trade-vision-vault.vercel.app' });
+    console.log('🌐 Opening web app');
+    try {
+      if (chrome?.tabs?.create) {
+        chrome.tabs.create({ url: 'https://trade-vision-vault.vercel.app' });
+      } else {
+        this.showStatus('Cannot open web app - Chrome tabs API not available', 'error');
+      }
+    } catch (error) {
+      console.error('❌ Web app error:', error);
+      this.showStatus('Failed to open web app', 'error');
     }
   }
 
   async exportData() {
+    console.log('📥 Export data called');
+    
     if (!this.backgroundConnected) {
       this.showStatus('Background script not connected', 'error');
       return;
     }
 
     try {
+      this.setButtonLoading('exportBtn', true);
+      this.showStatus('Exporting data...', 'info');
+      
       const response = await this.sendMessage({ type: 'GET_TRADES' });
+      
       if (response?.success && response.trades) {
         const dataStr = JSON.stringify(response.trades, null, 2);
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
@@ -424,33 +579,64 @@ class PopupController {
             url: url,
             filename: `trades_export_${new Date().toISOString().split('T')[0]}.json`
           });
+          this.showStatus(`Exported ${response.trades.length} trades`, 'success');
+        } else {
+          // Fallback: create download link
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `trades_export_${new Date().toISOString().split('T')[0]}.json`;
+          a.click();
+          this.showStatus('Data exported successfully', 'success');
         }
-        
-        this.showStatus('Data exported successfully', 'success');
+      } else {
+        throw new Error('No trade data to export');
       }
     } catch (error) {
+      console.error('❌ Export error:', error);
       this.handleError('Export failed', error);
+    } finally {
+      this.setButtonLoading('exportBtn', false);
     }
   }
 
   showHelp() {
-    if (chrome?.tabs?.create) {
-      chrome.tabs.create({ url: 'https://docs.replaylocker.com' });
+    console.log('❓ Opening help');
+    try {
+      if (chrome?.tabs?.create) {
+        chrome.tabs.create({ url: 'https://docs.replaylocker.com' });
+      } else {
+        this.showStatus('Cannot open help - Chrome tabs API not available', 'error');
+      }
+    } catch (error) {
+      console.error('❌ Help error:', error);
+      this.showStatus('Failed to open help', 'error');
     }
   }
 
   async clearData() {
-    if (confirm('Are you sure you want to clear all trade data?')) {
-      try {
-        if (chrome?.storage?.local) {
-          await chrome.storage.local.clear();
-          this.trades = [];
-          this.updateUI();
-          this.showStatus('Data cleared successfully', 'success');
-        }
-      } catch (error) {
-        this.handleError('Failed to clear data', error);
+    console.log('🗑️ Clear data called');
+    
+    if (!confirm('Are you sure you want to clear all trade data? This cannot be undone.')) {
+      return;
+    }
+
+    try {
+      this.setButtonLoading('clearBtn', true);
+      this.showStatus('Clearing data...', 'info');
+      
+      if (chrome?.storage?.local) {
+        await chrome.storage.local.clear();
+        this.trades = [];
+        this.updateUI();
+        this.showStatus('All data cleared successfully', 'success');
+      } else {
+        throw new Error('Chrome storage API not available');
       }
+    } catch (error) {
+      console.error('❌ Clear data error:', error);
+      this.handleError('Failed to clear data', error);
+    } finally {
+      this.setButtonLoading('clearBtn', false);
     }
   }
 

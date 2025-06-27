@@ -16,23 +16,33 @@
       this.platform = 'Tradovate';
       this.messageListenerActive = false;
       this.lastTradeTime = 0;
+      this.debugMode = true;
       this.captureOptions = {
         screenshots: true,
-        video: false // Video recording is complex, start with screenshots
+        video: false
       };
       this.init();
     }
 
     async init() {
-      console.log('Initializing Tradovate capture...');
+      console.log('🔧 Initializing Tradovate capture...');
       
-      this.setupMessageListener();
-      await this.registerWithBackground();
-      await this.getRecordingStatus();
-      this.setupUI();
-      this.setupTradeDetection();
-      
-      console.log('✅ Tradovate capture initialized');
+      try {
+        this.setupMessageListener();
+        await this.registerWithBackground();
+        await this.getRecordingStatus();
+        this.setupUI();
+        this.setupTradeDetection();
+        
+        console.log('✅ Tradovate capture initialized successfully');
+        
+        // Show initialization success
+        this.showNotification('Replay Locker initialized and ready to capture trades!', 'success');
+        
+      } catch (error) {
+        console.error('❌ Failed to initialize Tradovate capture:', error);
+        this.showNotification('Failed to initialize Replay Locker: ' + error.message, 'error');
+      }
     }
 
     setupMessageListener() {
@@ -132,7 +142,9 @@
     }
 
     setupUI() {
+      console.log('🎨 Setting up UI...');
       this.createRecordingIndicator();
+      this.createDebugPanel();
     }
 
     createRecordingIndicator() {
@@ -166,17 +178,44 @@
       indicator.addEventListener('click', () => this.toggleRecording());
       document.body.appendChild(indicator);
       
-      if (!document.getElementById('tradovate-styles')) {
-        const style = document.createElement('style');
-        style.id = 'tradovate-styles';
-        style.textContent = `
-          @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-          }
-        `;
-        document.head.appendChild(style);
+      console.log('✅ Recording indicator created');
+    }
+
+    createDebugPanel() {
+      if (!this.debugMode) return;
+      
+      const existing = document.getElementById('tradovate-debug-panel');
+      if (existing) {
+        existing.remove();
       }
+
+      const panel = document.createElement('div');
+      panel.id = 'tradovate-debug-panel';
+      panel.style.cssText = `
+        position: fixed;
+        top: 60px;
+        right: 10px;
+        z-index: 999998;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-family: monospace;
+        max-width: 200px;
+        word-wrap: break-word;
+      `;
+      
+      panel.innerHTML = `
+        <div><strong>Debug Info:</strong></div>
+        <div>Platform: ${this.platform}</div>
+        <div>Recording: <span id="debug-recording">${this.isRecording}</span></div>
+        <div>URL: ${window.location.href}</div>
+        <div>Injected: ✅</div>
+      `;
+      
+      document.body.appendChild(panel);
+      console.log('✅ Debug panel created');
     }
 
     updateIndicatorContent(indicator) {
@@ -189,21 +228,33 @@
     setupTradeDetection() {
       console.log('🎯 Setting up enhanced trade detection...');
       
-      // Method 1: Click detection with screenshot capture
+      // Method 1: Enhanced click detection
       document.addEventListener('click', (event) => {
         if (!this.isRecording) return;
         
         const target = event.target;
+        console.log('👆 Click detected on:', target.tagName, target.className, target.textContent?.substring(0, 50));
+        
         const button = this.findTradeButton(target);
         
         if (button) {
-          console.log('🎯 Trade button clicked:', button);
-          // Capture screenshot immediately when trade button is clicked
+          console.log('🎯 Trade button identified:', button);
           this.captureTradeWithScreenshot(button, event, 'button_click');
         }
       }, true);
 
-      // Method 2: DOM changes detection (for programmatic trades)
+      // Method 2: Form submission detection
+      document.addEventListener('submit', (event) => {
+        if (!this.isRecording) return;
+        
+        const form = event.target;
+        if (this.isTradeForm(form)) {
+          console.log('🎯 Trade form submitted:', form);
+          this.captureTradeWithScreenshot(form, event, 'form_submit');
+        }
+      }, true);
+
+      // Method 3: DOM changes detection
       const observer = new MutationObserver((mutations) => {
         if (!this.isRecording) return;
         
@@ -223,34 +274,70 @@
         subtree: true
       });
 
-      // Method 3: Keyboard detection (Enter key on trade forms)
+      // Method 4: Keyboard detection
       document.addEventListener('keydown', (event) => {
         if (!this.isRecording) return;
         
         if (event.key === 'Enter') {
           const activeElement = document.activeElement;
           if (this.isTradeInputElement(activeElement)) {
-            console.log('🎯 Enter pressed on trade form');
+            console.log('🎯 Enter pressed on trade input');
             this.captureTradeWithScreenshot(activeElement, event, 'keyboard_entry');
           }
         }
       });
+
+      // Method 5: Test button for manual testing
+      this.createTestButton();
       
-      console.log('✅ Enhanced trade detection setup complete');
+      console.log('✅ All trade detection methods setup complete');
+    }
+
+    createTestButton() {
+      const existing = document.getElementById('tradovate-test-button');
+      if (existing) {
+        existing.remove();
+      }
+
+      const testBtn = document.createElement('button');
+      testBtn.id = 'tradovate-test-button';
+      testBtn.textContent = 'Test Trade Capture';
+      testBtn.style.cssText = `
+        position: fixed;
+        bottom: 10px;
+        right: 10px;
+        z-index: 999999;
+        background: #f59e0b;
+        color: white;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+      `;
+
+      testBtn.addEventListener('click', () => {
+        console.log('🧪 Test button clicked');
+        this.captureTradeWithScreenshot(testBtn, null, 'test_button');
+      });
+
+      document.body.appendChild(testBtn);
+      console.log('✅ Test button created');
     }
 
     findTradeButton(element) {
       for (let current = element; current && current !== document; current = current.parentElement) {
         // Check data attributes
         const dataQa = current.getAttribute('data-qa');
-        if (dataQa && (dataQa.includes('buy') || dataQa.includes('sell'))) {
+        if (dataQa && (dataQa.includes('buy') || dataQa.includes('sell') || dataQa.includes('order'))) {
           return current;
         }
         
         // Check for trade-related classes
         const classes = current.className?.toLowerCase() || '';
-        if (classes.includes('buy-button') || classes.includes('sell-button') || 
-            classes.includes('trade-button') || classes.includes('order-button')) {
+        if (classes.includes('buy') || classes.includes('sell') || 
+            classes.includes('trade') || classes.includes('order') ||
+            classes.includes('submit') || classes.includes('execute')) {
           return current;
         }
         
@@ -260,13 +347,22 @@
           
           if (text.includes('buy') || text.includes('sell') || 
               text.includes('long') || text.includes('short') ||
-              text.includes('market') || text.includes('limit')) {
+              text.includes('market') || text.includes('limit') ||
+              text.includes('submit') || text.includes('place') ||
+              text.includes('execute') || text.includes('confirm')) {
             return current;
           }
         }
       }
       
       return null;
+    }
+
+    isTradeForm(form) {
+      const formContent = form.innerHTML.toLowerCase();
+      return formContent.includes('buy') || formContent.includes('sell') || 
+             formContent.includes('order') || formContent.includes('trade') ||
+             formContent.includes('quantity') || formContent.includes('price');
     }
 
     checkForTradeElements(element) {
@@ -292,7 +388,7 @@
 
     async captureTradeWithScreenshot(element, event, triggerType) {
       const now = Date.now();
-      if (now - this.lastTradeTime < 1000) {
+      if (now - this.lastTradeTime < 2000) { // Increased debounce to 2 seconds
         console.log('⏱️ Duplicate trade detection prevented');
         return;
       }
@@ -306,8 +402,12 @@
         element: elementText,
         direction,
         platform: this.platform,
-        trigger: triggerType
+        trigger: triggerType,
+        url: window.location.href
       });
+
+      // Show immediate feedback
+      this.showNotification(`Trade detected: ${direction} (${triggerType})`, 'info');
 
       try {
         // First, capture the screenshot
@@ -340,18 +440,28 @@
           timestamp: timestamp.toISOString(),
           screenshot_url: screenshotUrl,
           element_info: this.getElementInfo(element),
-          page_title: document.title
+          page_title: document.title,
+          user_agent: navigator.userAgent,
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight
+          }
         };
+        
+        console.log('📊 Trade data created:', tradeData);
         
         // Send trade data to background
         const tradeResponse = await this.sendTradeData(tradeData);
         
         if (tradeResponse) {
           this.showTradeNotification(tradeData, !!screenshotUrl);
+        } else {
+          throw new Error('Failed to send trade data');
         }
         
       } catch (error) {
         console.error('❌ Error capturing trade with screenshot:', error);
+        
         // Still try to capture the trade without screenshot
         const fallbackTradeData = {
           id: `tradovate-fallback-${Date.now()}`,
@@ -364,7 +474,8 @@
           page_url: window.location.href,
           timestamp: timestamp.toISOString(),
           screenshot_url: null,
-          error: 'Screenshot capture failed'
+          error: error.message,
+          fallback: true
         };
         
         await this.sendTradeData(fallbackTradeData);
@@ -427,11 +538,45 @@
       }
     }
 
+    showNotification(message, type = 'info') {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 120px;
+        right: 10px;
+        z-index: 999999;
+        background: ${type === 'success' ? '#10b981' : type === 'error' ? '#dc2626' : '#3b82f6'};
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        font-family: Arial, sans-serif;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        max-width: 200px;
+        word-wrap: break-word;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+      `;
+      
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+      }, 100);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => notification.remove(), 300);
+      }, 3000);
+    }
+
     showTradeNotification(trade, hasScreenshot) {
       const notification = document.createElement('div');
       notification.style.cssText = `
         position: fixed;
-        top: 60px;
+        top: 80px;
         right: 10px;
         z-index: 999999;
         background: #10b981;
@@ -452,6 +597,7 @@
         <small>${trade.direction} • ${trade.trigger}</small><br>
         <small>${trade.trade_time}</small><br>
         ${hasScreenshot ? '<small>📸 Screenshot included</small>' : '<small>⚠️ Screenshot failed</small>'}
+        ${trade.fallback ? '<br><small>⚠️ Fallback mode</small>' : ''}
       `;
       
       document.body.appendChild(notification);
@@ -463,7 +609,7 @@
       setTimeout(() => {
         notification.style.transform = 'translateX(100%)';
         setTimeout(() => notification.remove(), 300);
-      }, 5000); // Show longer notification for more info
+      }, 6000);
     }
 
     async toggleRecording() {
@@ -494,6 +640,7 @@
 
   function initCapture() {
     try {
+      console.log('🚀 Starting Tradovate capture initialization...');
       new TradovateCapture();
     } catch (error) {
       console.error('❌ Failed to initialize Tradovate capture:', error);
@@ -503,6 +650,6 @@
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initCapture);
   } else {
-    setTimeout(initCapture, 500);
+    setTimeout(initCapture, 1000); // Increased delay to ensure page is fully loaded
   }
 })();
