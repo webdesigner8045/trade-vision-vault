@@ -302,83 +302,36 @@ class ExtensionBackground {
       await chrome.tabs.update(tabId, { active: true });
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Start screen recording using chrome.tabCapture
-      const stream = await chrome.tabCapture.capture({
-        audio: true,
-        video: true,
-        audioConstraints: {
-          mandatory: {
-            chromeMediaSource: 'tab',
-            echoCancellation: true
+      // Get media stream ID using the correct Manifest V3 API
+      const streamId = await new Promise((resolve, reject) => {
+        chrome.tabCapture.getMediaStreamId({
+          targetTabId: tabId
+        }, (streamId) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(streamId);
           }
-        },
-        videoConstraints: {
-          mandatory: {
-            chromeMediaSource: 'tab',
-            maxWidth: 1920,
-            maxHeight: 1080,
-            maxFrameRate: 30
-          }
-        }
+        });
       });
 
-      if (!stream) {
-        throw new Error('Failed to capture tab stream');
+      if (!streamId) {
+        throw new Error('Failed to get media stream ID');
       }
 
-      // Create MediaRecorder
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'video/webm;codecs=vp9'
-      });
-
+      // Inject script to start recording in the content script context
       const recordingId = `recording-${tabId}-${Date.now()}`;
-      const chunks = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-
-      mediaRecorder.onstop = async () => {
-        console.log('🎥 Recording stopped, processing video...');
-        
-        try {
-          const blob = new Blob(chunks, { type: 'video/webm' });
-          const videoUrl = await this.saveVideoToStorage(blob, recordingId);
-          
-          // Update recording data
-          const recording = this.activeRecordings.get(tabId);
-          if (recording) {
-            recording.videoUrl = videoUrl;
-            recording.endTime = Date.now();
-            recording.duration = recording.endTime - recording.startTime;
-          }
-          
-          console.log('✅ Video saved successfully:', videoUrl);
-        } catch (error) {
-          console.error('❌ Error saving video:', error);
-        }
-        
-        // Clean up
-        stream.getTracks().forEach(track => track.stop());
-        this.activeRecordings.delete(tabId);
-      };
-
-      mediaRecorder.onerror = (error) => {
-        console.error('❌ MediaRecorder error:', error);
-        this.activeRecordings.delete(tabId);
-      };
-
-      // Start recording
-      mediaRecorder.start(1000); // Collect data every second
+      
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: this.startRecordingInPage,
+        args: [streamId, recordingId]
+      });
 
       // Store recording info
       this.activeRecordings.set(tabId, {
         id: recordingId,
-        mediaRecorder,
-        stream,
-        chunks,
+        streamId,
         startTime: Date.now(),
         tabId
       });
@@ -389,13 +342,100 @@ class ExtensionBackground {
     } catch (error) {
       console.error('❌ Error starting video recording:', error);
       
-      if (error.message.includes('not available')) {
+      if (error.message.includes('not available') || error.message.includes('not supported')) {
         return { success: false, error: 'Screen recording not available - missing permissions' };
       } else if (error.message.includes('denied')) {
         return { success: false, error: 'Screen recording permission denied' };
       } else {
         return { success: false, error: `Recording failed: ${error.message}` };
       }
+    }
+  }
+
+  // Function to be injected into the page to handle recording
+  startRecordingInPage(streamId, recordingId) {
+    console.log('🎥 Starting page recording with stream ID:', streamId);
+    
+    try {
+      // Get the media stream using the stream ID
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            chromeMediaSourceId: streamId
+          }
+        },
+        video: {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            chromeMediaSourceId: streamId,
+            maxWidth: 1920,
+            maxHeight: 1080,
+            maxFrameRate: 30
+          }
+        }
+      }).then(stream => {
+        console.log('✅ Got media stream, creating recorder');
+        
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'video/webm;codecs=vp9'
+        });
+        
+        const chunks = [];
+        
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        };
+        
+        mediaRecorder.onstop = () => {
+          console.log('🎥 Recording stopped, processing video...');
+          
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const reader = new FileReader();
+          
+          reader.onloadend = () => {
+            // Store the video data in the page's localStorage temporarily
+            const videoData = {
+              id: recordingId,
+              data: reader.result,
+              timestamp: new Date().toISOString(),
+              size: blob.size
+            };
+            
+            localStorage.setItem(`recording_${recordingId}`, JSON.stringify(videoData));
+            console.log('✅ Video data stored in localStorage');
+          };
+          
+          reader.readAsDataURL(blob);
+          
+          // Clean up
+          stream.getTracks().forEach(track => track.stop());
+        };
+        
+        mediaRecorder.onerror = (error) => {
+          console.error('❌ MediaRecorder error:', error);
+        };
+        
+        // Start recording
+        mediaRecorder.start(1000);
+        
+        // Store recorder reference globally so we can stop it later
+        window.replayLockerRecorder = {
+          mediaRecorder,
+          stream,
+          recordingId
+        };
+        
+        console.log('✅ Recording started successfully');
+        
+      }).catch(error => {
+        console.error('❌ Error getting media stream:', error);
+      });
+      
+    } catch (error) {
+      console.error('❌ Error in startRecordingInPage:', error);
     }
   }
 
@@ -410,20 +450,38 @@ class ExtensionBackground {
         return { success: false, error: 'No active recording' };
       }
 
-      // Stop the MediaRecorder
-      if (recording.mediaRecorder && recording.mediaRecorder.state === 'recording') {
-        recording.mediaRecorder.stop();
+      // Inject script to stop recording in the content script context
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: this.stopRecordingInPage,
+        args: [recording.id]
+      });
+
+      // Wait a moment for the recording to stop and process
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Retrieve the video data from the page
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: this.getRecordingData,
+        args: [recording.id]
+      });
+
+      let videoUrl = null;
+      if (results && results[0] && results[0].result) {
+        const videoData = results[0].result;
+        videoUrl = await this.saveVideoToStorage(videoData, recording.id);
       }
 
-      // Wait a moment for the stop event to process
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const duration = recording.endTime ? recording.endTime - recording.startTime : Date.now() - recording.startTime;
+      const duration = Date.now() - recording.startTime;
+      
+      // Clean up
+      this.activeRecordings.delete(tabId);
       
       console.log('✅ Video recording stopped successfully');
       return { 
         success: true, 
-        videoUrl: recording.videoUrl,
+        videoUrl: videoUrl,
         duration: Math.round(duration / 1000) // Convert to seconds
       };
 
@@ -433,30 +491,69 @@ class ExtensionBackground {
     }
   }
 
-  async saveVideoToStorage(blob, recordingId) {
+  // Function to be injected to stop recording
+  stopRecordingInPage(recordingId) {
+    console.log('🛑 Stopping page recording:', recordingId);
+    
     try {
-      // Convert blob to base64
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.readAsDataURL(blob);
-      });
+      if (window.replayLockerRecorder && window.replayLockerRecorder.recordingId === recordingId) {
+        const recorder = window.replayLockerRecorder;
+        
+        if (recorder.mediaRecorder && recorder.mediaRecorder.state === 'recording') {
+          recorder.mediaRecorder.stop();
+          console.log('✅ MediaRecorder stopped');
+        }
+        
+        // Clean up the global reference
+        delete window.replayLockerRecorder;
+      } else {
+        console.warn('⚠️ No matching recorder found');
+      }
+    } catch (error) {
+      console.error('❌ Error stopping recording:', error);
+    }
+  }
 
-      // Store in chrome.storage.local (note: this has size limits)
+  // Function to retrieve recording data from page
+  getRecordingData(recordingId) {
+    try {
+      const key = `recording_${recordingId}`;
+      const data = localStorage.getItem(key);
+      
+      if (data) {
+        // Clean up localStorage
+        localStorage.removeItem(key);
+        return JSON.parse(data);
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Error getting recording data:', error);
+      return null;
+    }
+  }
+
+  async saveVideoToStorage(videoData, recordingId) {
+    try {
+      if (!videoData || !videoData.data) {
+        throw new Error('No video data to save');
+      }
+
+      // Store in chrome.storage.local
       const videos = await this.getStoredVideos();
-      const videoData = {
+      const newVideo = {
         id: recordingId,
-        timestamp: new Date().toISOString(),
-        data: base64,
-        size: blob.size,
-        type: blob.type
+        timestamp: videoData.timestamp || new Date().toISOString(),
+        data: videoData.data,
+        size: videoData.size || 0,
+        type: 'video/webm'
       };
 
-      videos.push(videoData);
+      videos.push(newVideo);
 
-      // Keep only last 10 videos to manage storage
-      if (videos.length > 10) {
-        videos.splice(0, videos.length - 10);
+      // Keep only last 5 videos to manage storage (videos are large)
+      if (videos.length > 5) {
+        videos.splice(0, videos.length - 5);
       }
 
       await chrome.storage.local.set({ videos });
