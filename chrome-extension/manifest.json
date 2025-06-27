@@ -1,4 +1,3 @@
-
 {
   "manifest_version": 3,
   "name": "Replay Locker - Trade Capture",
@@ -10,7 +9,8 @@
     "scripting",
     "tabs",
     "notifications",
-    "tabCapture"
+    "tabCapture",
+    "downloads"
   ],
   "host_permissions": [
     "https://www.tradingview.com/*",

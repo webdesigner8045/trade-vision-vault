@@ -1,4 +1,4 @@
-// Enhanced background service worker with Supabase integration
+// Enhanced background service worker with improved recording and screenshot functionality
 class ExtensionBackground {
   constructor() {
     this.injectedTabs = new Set();
@@ -16,7 +16,6 @@ class ExtensionBackground {
     setTimeout(() => {
       this.isReady = true;
       console.log('✅ Background script ready');
-      // Update badge to show ready state
       chrome.action.setBadgeText({ text: '' });
       chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
     }, 100);
@@ -156,6 +155,120 @@ class ExtensionBackground {
     }
   }
 
+  async handleCaptureScreenshot(message, sender) {
+    try {
+      const tabId = message.tabId || sender.tab?.id;
+      if (!tabId) throw new Error('No tab ID available');
+
+      console.log('📸 Attempting screenshot capture for tab:', tabId);
+
+      // First, make the tab active to ensure we can capture it
+      await chrome.tabs.update(tabId, { active: true });
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Capture the visible tab with better error handling
+      let screenshotDataUrl;
+      try {
+        screenshotDataUrl = await chrome.tabs.captureVisibleTab(
+          sender.tab?.windowId || null,
+          { format: 'png', quality: 90 }
+        );
+      } catch (captureError) {
+        console.error('❌ Tab capture failed:', captureError);
+        throw new Error(`Screenshot capture failed: ${captureError.message}`);
+      }
+
+      if (!screenshotDataUrl) {
+        throw new Error('Screenshot data is empty');
+      }
+
+      console.log('✅ Screenshot captured, size:', screenshotDataUrl.length);
+
+      // For now, save locally since authentication might not be set up
+      const fileName = `screenshot-${Date.now()}.png`;
+      
+      // Try to save to downloads folder using chrome.downloads API
+      try {
+        const downloadId = await chrome.downloads.download({
+          url: screenshotDataUrl,
+          filename: `replay-locker-screenshots/${fileName}`,
+          saveAs: false
+        });
+        
+        console.log('✅ Screenshot saved to downloads:', downloadId);
+        
+        return { 
+          success: true, 
+          message: 'Screenshot saved to Downloads folder',
+          filename: fileName
+        };
+        
+      } catch (downloadError) {
+        console.error('❌ Download failed:', downloadError);
+        
+        // Fallback: try to upload to Supabase if authenticated
+        return await this.uploadScreenshotFallback(screenshotDataUrl, {
+          reason: message.reason || 'manual',
+          tabId: tabId,
+          timestamp: Date.now()
+        });
+      }
+
+    } catch (error) {
+      console.error('❌ Screenshot capture error:', error);
+      return { 
+        success: false, 
+        error: error.message,
+        details: 'Make sure the tab is active and visible'
+      };
+    }
+  }
+
+  async uploadScreenshotFallback(screenshotDataUrl, metadata) {
+    try {
+      // Check if user is authenticated
+      const session = await chrome.storage.local.get('supabase_session');
+      if (!session.supabase_session) {
+        return { 
+          success: false, 
+          error: 'Not authenticated - screenshot saved locally instead' 
+        };
+      }
+
+      const screenshotBlob = this.dataURLtoBlob(screenshotDataUrl);
+      const userId = session.supabase_session.user.id;
+      const fileName = `screenshot-${Date.now()}.png`;
+      
+      console.log(`📤 Uploading screenshot: ${fileName}`);
+      
+      const formData = new FormData();
+      formData.append('file', screenshotBlob, fileName);
+
+      const uploadResponse = await fetch(
+        `${this.supabaseUrl}/storage/v1/object/trade-files/${userId}/${fileName}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.supabase_session.access_token}`,
+          },
+          body: formData
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed: ${uploadResponse.status}`);
+      }
+
+      const screenshotUrl = `${this.supabaseUrl}/storage/v1/object/public/trade-files/${userId}/${fileName}`;
+      
+      return { success: true, url: screenshotUrl };
+
+    } catch (error) {
+      console.error('❌ Screenshot upload error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   async handleToggleRecording(message, sender) {
     try {
       const tabId = sender.tab?.id;
@@ -217,299 +330,65 @@ class ExtensionBackground {
     }
   }
 
-  async handleCaptureScreenshot(message, sender) {
-    try {
-      const tabId = message.tabId || sender.tab?.id;
-      if (!tabId) throw new Error('No tab ID available');
-
-      console.log('📸 Capturing screenshot for tab:', tabId);
-
-      // Capture the visible tab
-      const screenshotDataUrl = await chrome.tabs.captureVisibleTab(
-        sender.tab?.windowId,
-        { format: 'png', quality: 90 }
-      );
-
-      if (!screenshotDataUrl) {
-        throw new Error('Failed to capture screenshot');
-      }
-
-      // Convert data URL to blob
-      const screenshotBlob = this.dataURLtoBlob(screenshotDataUrl);
-      
-      // Upload screenshot to Supabase
-      const uploadResult = await this.uploadScreenshot(screenshotBlob, {
-        reason: message.reason || 'manual',
-        tabId: tabId,
-        timestamp: Date.now()
-      });
-
-      if (uploadResult.success) {
-        console.log('✅ Screenshot uploaded successfully');
-        return { success: true, url: uploadResult.url };
-      } else {
-        throw new Error('Failed to upload screenshot');
-      }
-
-    } catch (error) {
-      console.error('❌ Screenshot capture error:', error);
-      return { success: false, error: error.message };
-    }
-  }
-
-  async uploadScreenshot(screenshotBlob, metadata) {
-    try {
-      // Get current user session
-      const session = await chrome.storage.local.get('supabase_session');
-      if (!session.supabase_session) {
-        throw new Error('User not authenticated');
-      }
-
-      const userId = session.supabase_session.user.id;
-      const fileName = `screenshot-${Date.now()}.png`;
-      
-      console.log(`📤 Uploading screenshot: ${fileName}, size: ${screenshotBlob.size} bytes`);
-      
-      // Upload screenshot to Supabase Storage
-      const formData = new FormData();
-      formData.append('file', screenshotBlob, fileName);
-
-      const uploadResponse = await fetch(
-        `${this.supabaseUrl}/storage/v1/object/trade-files/${userId}/${fileName}`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.supabase_session.access_token}`,
-          },
-          body: formData
-        }
-      );
-
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        throw new Error(`Screenshot upload failed: ${errorText}`);
-      }
-
-      const screenshotUrl = `${this.supabaseUrl}/storage/v1/object/public/trade-files/${userId}/${fileName}`;
-      
-      console.log('✅ Screenshot uploaded successfully:', screenshotUrl);
-      
-      return { success: true, url: screenshotUrl };
-
-    } catch (error) {
-      console.error('❌ Error uploading screenshot:', error);
-      return { success: false, error: error.message };
-    }
-  }
-
-  async handleAsyncMessage(message, sender) {
-    switch (message.type) {
-      case 'TRADE_OPENED':
-        return await this.handleTradeOpened(message.data, sender.tab);
-      case 'TRADE_CLOSED':
-        return await this.handleTradeClosed(message.data, sender.tab);
-      case 'GET_TRADES':
-        return await this.handleGetTrades();
-      default:
-        return { success: false, error: `Unknown message type: ${message.type}` };
-    }
-  }
-
-  async handleGetTrades() {
-    try {
-      // Get current user session
-      const session = await chrome.storage.local.get('supabase_session');
-      if (!session.supabase_session) {
-        return { success: true, trades: [] };
-      }
-
-      const response = await fetch(`${this.supabaseUrl}/rest/v1/trade_replays?select=*&order=created_at.desc&limit=50`, {
-        headers: {
-          'Authorization': `Bearer ${session.supabase_session.access_token}`,
-          'apikey': this.supabaseKey,
-        }
-      });
-
-      if (response.ok) {
-        const trades = await response.json();
-        return { success: true, trades };
-      } else {
-        throw new Error('Failed to fetch trades');
-      }
-    } catch (error) {
-      console.error('❌ Error fetching trades:', error);
-      return { success: false, error: error.message, trades: [] };
-    }
-  }
-
-  async handleTradeOpened(tradeData, tab) {
-    console.log('📈 Trade opened - starting recording:', tradeData);
-    
-    try {
-      const tabId = tab?.id;
-      if (!tabId) throw new Error('No tab ID available');
-
-      // Start screen recording
-      const recordingResult = await this.startScreenRecording(tabId);
-      
-      if (recordingResult.success) {
-        console.log('✅ Recording started successfully');
-        chrome.action.setBadgeText({ text: 'REC' });
-        chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
-        
-        // Store recording info
-        this.activeRecordings.set(tabId, {
-          ...recordingResult,
-          tradeData,
-          startTime: Date.now()
-        });
-      }
-
-      return { success: true, recording: recordingResult.success };
-
-    } catch (error) {
-      console.error('❌ Error handling trade opened:', error);
-      chrome.action.setBadgeText({ text: '!' });
-      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
-      return { success: false, error: error.message };
-    }
-  }
-
-  async handleTradeClosed(tradeData, tab) {
-    console.log('🔚 Trade closed - stopping recording:', tradeData);
-    
-    try {
-      const tabId = tab?.id;
-      if (!tabId) throw new Error('No tab ID available');
-
-      // Update badge to show processing
-      chrome.action.setBadgeText({ text: '...' });
-      chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
-
-      // Stop recording and get video
-      const recordingResult = await this.stopScreenRecording(tabId);
-      
-      if (recordingResult.success && recordingResult.videoBlob) {
-        // Upload to Supabase and create trade record
-        const uploadResult = await this.uploadTradeVideo(recordingResult.videoBlob, tradeData);
-        
-        if (uploadResult.success) {
-          console.log('✅ Trade video uploaded and saved');
-          chrome.action.setBadgeText({ text: '✓' });
-          chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
-          
-          // Clear badge after 3 seconds
-          setTimeout(() => {
-            chrome.action.setBadgeText({ text: '' });
-          }, 3000);
-          
-          return { success: true, tradeId: uploadResult.tradeId };
-        }
-      }
-
-      chrome.action.setBadgeText({ text: '!' });
-      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
-      return { success: false, error: 'Failed to process recording' };
-
-    } catch (error) {
-      console.error('❌ Error handling trade closed:', error);
-      chrome.action.setBadgeText({ text: '!' });
-      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
-      return { success: false, error: error.message };
-    }
-  }
-
+  // Improved recording functions with better error handling
   async startScreenRecording(tabId) {
     try {
-      // Make tab active for recording
+      console.log('🎥 Starting screen recording for tab:', tabId);
+      
+      // Make tab active and wait
       await chrome.tabs.update(tabId, { active: true });
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      // Start recording using tabCapture API
+      // Get media stream with better error handling
       const streamId = await new Promise((resolve, reject) => {
         chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (streamId) => {
           if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
+            reject(new Error(`Tab capture error: ${chrome.runtime.lastError.message}`));
           } else if (!streamId) {
-            reject(new Error('Failed to get media stream ID'));
+            reject(new Error('No stream ID returned - tab may not be capturable'));
           } else {
             resolve(streamId);
           }
         });
       });
 
-      // Inject recording script with enhanced error handling
+      console.log('✅ Got stream ID:', streamId);
+
+      // Inject improved recording script
       await chrome.scripting.executeScript({
         target: { tabId },
-        func: this.startRecordingScript,
+        func: this.improvedRecordingScript,
         args: [streamId]
       });
 
-      console.log(`✅ Recording started for tab ${tabId}`);
+      console.log('✅ Recording script injected successfully');
       return { success: true, streamId };
 
     } catch (error) {
-      console.error('❌ Error starting recording:', error);
-      return { success: false, error: error.message };
+      console.error('❌ Recording start error:', error);
+      return { 
+        success: false, 
+        error: error.message,
+        details: 'Try refreshing the page and ensure it\'s a supported site'
+      };
     }
   }
 
-  async stopScreenRecording(tabId) {
-    try {
-      const recording = this.activeRecordings.get(tabId);
-      if (!recording) {
-        console.warn('No active recording found for tab', tabId);
-      }
-
-      // Stop recording
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: this.stopRecordingScript
-      });
-
-      // Wait for recording to process
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Get video data with retry logic
-      let videoDataUrl = null;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const results = await chrome.scripting.executeScript({
-            target: { tabId },
-            func: this.getVideoData
-          });
-
-          if (results && results[0] && results[0].result) {
-            videoDataUrl = results[0].result;
-            break;
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        } catch (error) {
-          console.warn(`Attempt ${attempt + 1} failed:`, error);
-        }
-      }
-
-      if (videoDataUrl) {
-        const videoBlob = this.dataURLtoBlob(videoDataUrl);
-        this.activeRecordings.delete(tabId);
-        
-        console.log(`✅ Recording stopped for tab ${tabId}, video size: ${videoBlob.size} bytes`);
-        return { success: true, videoBlob };
-      }
-
-      return { success: false, error: 'No video data captured' };
-
-    } catch (error) {
-      console.error('❌ Error stopping recording:', error);
-      return { success: false, error: error.message };
-    }
-  }
-
-  // Enhanced injected script to start recording
-  startRecordingScript(streamId) {
-    console.log('🎥 Starting recording with stream ID:', streamId);
+  // Improved recording script with better MediaRecorder handling
+  improvedRecordingScript(streamId) {
+    console.log('🎥 Initializing recording with stream:', streamId);
     
+    // Clean up any existing recorder
+    if (window.tradeRecorder) {
+      try {
+        window.tradeRecorder.mediaRecorder.stop();
+        window.tradeRecorder.stream.getTracks().forEach(track => track.stop());
+      } catch (e) {
+        console.log('Cleaned up previous recorder');
+      }
+      delete window.tradeRecorder;
+    }
+
     navigator.mediaDevices.getUserMedia({
       audio: { 
         mandatory: { 
@@ -522,53 +401,107 @@ class ExtensionBackground {
           chromeMediaSource: 'tab', 
           chromeMediaSourceId: streamId,
           maxWidth: 1920,
-          maxHeight: 1080
+          maxHeight: 1080,
+          maxFrameRate: 30
         } 
       }
     }).then(stream => {
-      const options = { mimeType: 'video/webm;codecs=vp9' };
-      let mediaRecorder;
+      console.log('✅ Got media stream:', stream.getTracks().length, 'tracks');
       
-      try {
-        mediaRecorder = new MediaRecorder(stream, options);
-      } catch (e) {
-        // Fallback to default codec
-        mediaRecorder = new MediaRecorder(stream);
+      // Try different codec options
+      const mimeTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus', 
+        'video/webm;codecs=h264,opus',
+        'video/webm',
+        'video/mp4'
+      ];
+      
+      let mediaRecorder = null;
+      let selectedMimeType = null;
+      
+      for (const mimeType of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mimeType)) {
+          try {
+            mediaRecorder = new MediaRecorder(stream, { 
+              mimeType,
+              videoBitsPerSecond: 2500000 // 2.5 Mbps
+            });
+            selectedMimeType = mimeType;
+            console.log('✅ Using codec:', mimeType);
+            break;
+          } catch (e) {
+            console.log('❌ Failed to create recorder with:', mimeType);
+          }
+        }
+      }
+      
+      if (!mediaRecorder) {
+        console.error('❌ No supported MediaRecorder format found');
+        stream.getTracks().forEach(track => track.stop());
+        return;
       }
       
       const chunks = [];
+      let recordingStartTime = Date.now();
       
       mediaRecorder.ondataavailable = (event) => {
+        console.log('📊 Recording data chunk:', event.data.size, 'bytes');
         if (event.data.size > 0) {
           chunks.push(event.data);
         }
       };
       
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
+        console.log('🛑 Recording stopped, processing', chunks.length, 'chunks');
+        
+        const blob = new Blob(chunks, { type: selectedMimeType || 'video/webm' });
+        console.log('✅ Created video blob:', blob.size, 'bytes');
+        
         const reader = new FileReader();
         reader.onloadend = () => {
-          localStorage.setItem('trade_video', reader.result);
-          localStorage.setItem('trade_video_size', blob.size.toString());
-          console.log('✅ Video saved to localStorage, size:', blob.size);
+          try {
+            localStorage.setItem('trade_video', reader.result);
+            localStorage.setItem('trade_video_size', blob.size.toString());
+            localStorage.setItem('trade_video_duration', Math.floor((Date.now() - recordingStartTime) / 1000).toString());
+            console.log('✅ Video saved to localStorage');
+          } catch (e) {
+            console.error('❌ Failed to save video:', e);
+          }
         };
         reader.readAsDataURL(blob);
         
-        // Clean up
-        stream.getTracks().forEach(track => track.stop());
+        // Clean up stream
+        stream.getTracks().forEach(track => {
+          track.stop();
+          console.log('🔇 Stopped track:', track.kind);
+        });
       };
       
       mediaRecorder.onerror = (event) => {
         console.error('❌ MediaRecorder error:', event.error);
+        localStorage.setItem('recording_error', event.error.toString());
       };
       
-      mediaRecorder.start(1000); // Capture data every second
-      window.tradeRecorder = { mediaRecorder, stream };
+      mediaRecorder.onstart = () => {
+        console.log('✅ Recording started successfully');
+        recordingStartTime = Date.now();
+      };
       
-      console.log('✅ MediaRecorder started successfully');
+      // Start recording with smaller time slices for better data availability
+      mediaRecorder.start(500);
+      
+      // Store recorder reference
+      window.tradeRecorder = { 
+        mediaRecorder, 
+        stream, 
+        startTime: recordingStartTime,
+        mimeType: selectedMimeType
+      };
       
     }).catch(error => {
       console.error('❌ Failed to get media stream:', error);
+      localStorage.setItem('recording_error', error.toString());
     });
   }
 
@@ -695,6 +628,134 @@ class ExtensionBackground {
   generateTradeNotes(tradeData) {
     const pnl = tradeData.exit_price ? tradeData.exit_price - tradeData.entry_price : 0;
     return `Auto-recorded ${tradeData.direction || 'trade'} - ${pnl > 0 ? 'Profit' : 'Loss'}: ${pnl.toFixed(2)}`;
+  }
+
+  async handleAsyncMessage(message, sender) {
+    switch (message.type) {
+      case 'TRADE_OPENED':
+        return await this.handleTradeOpened(message.data, sender.tab);
+      case 'TRADE_CLOSED':
+        return await this.handleTradeClosed(message.data, sender.tab);
+      case 'GET_TRADES':
+        return await this.handleGetTrades();
+      case 'GET_RECORDING_ERROR':
+        return await this.getRecordingError();
+      default:
+        return { success: false, error: `Unknown message type: ${message.type}` };
+    }
+  }
+
+  async getRecordingError() {
+    try {
+      // This would need to be implemented in content script to check localStorage
+      return { success: true, error: null };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async handleGetTrades() {
+    try {
+      // Get current user session
+      const session = await chrome.storage.local.get('supabase_session');
+      if (!session.supabase_session) {
+        return { success: true, trades: [] };
+      }
+
+      const response = await fetch(`${this.supabaseUrl}/rest/v1/trade_replays?select=*&order=created_at.desc&limit=50`, {
+        headers: {
+          'Authorization': `Bearer ${session.supabase_session.access_token}`,
+          'apikey': this.supabaseKey,
+        }
+      });
+
+      if (response.ok) {
+        const trades = await response.json();
+        return { success: true, trades };
+      } else {
+        throw new Error('Failed to fetch trades');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching trades:', error);
+      return { success: false, error: error.message, trades: [] };
+    }
+  }
+
+  async handleTradeOpened(tradeData, tab) {
+    console.log('📈 Trade opened - starting recording:', tradeData);
+    
+    try {
+      const tabId = tab?.id;
+      if (!tabId) throw new Error('No tab ID available');
+
+      // Start screen recording
+      const recordingResult = await this.startScreenRecording(tabId);
+      
+      if (recordingResult.success) {
+        console.log('✅ Recording started successfully');
+        chrome.action.setBadgeText({ text: 'REC' });
+        chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+        
+        // Store recording info
+        this.activeRecordings.set(tabId, {
+          ...recordingResult,
+          tradeData,
+          startTime: Date.now()
+        });
+      }
+
+      return { success: true, recording: recordingResult.success };
+
+    } catch (error) {
+      console.error('❌ Error handling trade opened:', error);
+      chrome.action.setBadgeText({ text: '!' });
+      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+      return { success: false, error: error.message };
+    }
+  }
+
+  async handleTradeClosed(tradeData, tab) {
+    console.log('🔚 Trade closed - stopping recording:', tradeData);
+    
+    try {
+      const tabId = tab?.id;
+      if (!tabId) throw new Error('No tab ID available');
+
+      // Update badge to show processing
+      chrome.action.setBadgeText({ text: '...' });
+      chrome.action.setBadgeBackgroundColor({ color: '#f59e0b' });
+
+      // Stop recording and get video
+      const recordingResult = await this.stopScreenRecording(tabId);
+      
+      if (recordingResult.success && recordingResult.videoBlob) {
+        // Upload to Supabase and create trade record
+        const uploadResult = await this.uploadTradeVideo(recordingResult.videoBlob, tradeData);
+        
+        if (uploadResult.success) {
+          console.log('✅ Trade video uploaded and saved');
+          chrome.action.setBadgeText({ text: '✓' });
+          chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+          
+          // Clear badge after 3 seconds
+          setTimeout(() => {
+            chrome.action.setBadgeText({ text: '' });
+          }, 3000);
+          
+          return { success: true, tradeId: uploadResult.tradeId };
+        }
+      }
+
+      chrome.action.setBadgeText({ text: '!' });
+      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+      return { success: false, error: 'Failed to process recording' };
+
+    } catch (error) {
+      console.error('❌ Error handling trade closed:', error);
+      chrome.action.setBadgeText({ text: '!' });
+      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+      return { success: false, error: error.message };
+    }
   }
 }
 

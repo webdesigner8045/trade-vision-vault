@@ -1,4 +1,3 @@
-
 (function() {
   'use strict';
 
@@ -26,12 +25,26 @@
         this.setupTradeDetection();
         this.createStatusUI();
         this.createTestUI();
+        this.setupErrorReporting();
         
         console.log('✅ Tradovate capture initialized successfully');
         
       } catch (error) {
         console.error('❌ Failed to initialize Tradovate capture:', error);
+        this.showNotification(`❌ Initialization failed: ${error.message}`, 'error');
       }
+    }
+
+    setupErrorReporting() {
+      // Check for recording errors periodically
+      setInterval(() => {
+        const recordingError = localStorage.getItem('recording_error');
+        if (recordingError) {
+          console.error('🎥 Recording error detected:', recordingError);
+          this.showNotification(`🎥 Recording error: ${recordingError}`, 'error');
+          localStorage.removeItem('recording_error');
+        }
+      }, 2000);
     }
 
     async registerWithBackground() {
@@ -479,8 +492,27 @@
       closeBtn.onmouseout = () => closeBtn.style.background = '#dc2626';
       closeBtn.onclick = () => this.simulateTradeClose();
 
+      // Test screenshot button
+      const screenshotBtn = document.createElement('button');
+      screenshotBtn.textContent = '📸 Test Screenshot';
+      screenshotBtn.style.cssText = `
+        background: #7c3aed;
+        color: white;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 6px;
+        font-size: 12px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: background 0.2s;
+      `;
+      screenshotBtn.onmouseover = () => screenshotBtn.style.background = '#6d28d9';
+      screenshotBtn.onmouseout = () => screenshotBtn.style.background = '#7c3aed';
+      screenshotBtn.onclick = () => this.testScreenshot();
+
       container.appendChild(openBtn);
       container.appendChild(closeBtn);
+      container.appendChild(screenshotBtn);
       document.body.appendChild(container);
     }
 
@@ -502,6 +534,29 @@
         });
       } else {
         this.showNotification('No active trades to close', 'warning');
+      }
+    }
+
+    async testScreenshot() {
+      try {
+        console.log('📸 Testing screenshot functionality...');
+        this.showNotification('📸 Taking screenshot...', 'info');
+        
+        const response = await this.sendMessage({
+          type: 'CAPTURE_SCREENSHOT',
+          reason: 'test',
+          tabId: null // Let background script determine tab ID
+        });
+
+        if (response?.success) {
+          this.showNotification(`✅ Screenshot saved: ${response.filename || 'Success'}`, 'success');
+        } else {
+          this.showNotification(`❌ Screenshot failed: ${response?.error || 'Unknown error'}`, 'error');
+        }
+
+      } catch (error) {
+        console.error('❌ Screenshot test error:', error);
+        this.showNotification(`❌ Screenshot error: ${error.message}`, 'error');
       }
     }
 
