@@ -6,6 +6,7 @@ class ExtensionBackground {
     this.isReady = false;
     this.activeRecordings = new Map();
     this.supabaseClient = null;
+    this.isRecording = false;
     
     console.log('🚀 Background Script starting...');
     this.initializeSupabase();
@@ -50,6 +51,25 @@ class ExtensionBackground {
             console.log(`✅ Content script registered for tab ${tabId}`);
             sendResponse({ success: true, registered: true });
           }
+          return true;
+        }
+
+        if (message.type === 'GET_RECORDING_STATUS') {
+          sendResponse({ 
+            success: true, 
+            isRecording: this.isRecording,
+            activeRecordings: this.activeRecordings.size 
+          });
+          return true;
+        }
+
+        if (message.type === 'TOGGLE_RECORDING') {
+          this.handleToggleRecording(message, sender).then(result => {
+            sendResponse(result);
+          }).catch(error => {
+            console.error('❌ Toggle recording error:', error);
+            sendResponse({ success: false, error: error.message });
+          });
           return true;
         }
 
@@ -126,14 +146,104 @@ class ExtensionBackground {
     }
   }
 
+  async handleToggleRecording(message, sender) {
+    try {
+      const tabId = sender.tab?.id;
+      if (!tabId) throw new Error('No tab ID available');
+      
+      this.isRecording = !this.isRecording;
+      
+      if (this.isRecording) {
+        console.log('🔴 Starting recording manually');
+        chrome.action.setBadgeText({ text: 'REC' });
+        chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+        
+        // Start recording for this tab
+        const recordingResult = await this.startScreenRecording(tabId);
+        if (recordingResult.success) {
+          this.activeRecordings.set(tabId, {
+            ...recordingResult,
+            startTime: Date.now(),
+            manual: true
+          });
+        }
+        
+      } else {
+        console.log('🛑 Stopping recording manually');
+        chrome.action.setBadgeText({ text: '' });
+        chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+        
+        // Stop recording for this tab
+        if (this.activeRecordings.has(tabId)) {
+          const recordingResult = await this.stopScreenRecording(tabId);
+          if (recordingResult.success && recordingResult.videoBlob) {
+            // Create a simple trade record for manual recording
+            const tradeData = {
+              instrument: 'MANUAL_RECORDING',
+              direction: 'MANUAL',
+              entry_price: 0,
+              exit_price: 0,
+              trade_date: new Date().toISOString().split('T')[0],
+              trade_time: new Date().toTimeString().split(' ')[0]
+            };
+            
+            await this.uploadTradeVideo(recordingResult.videoBlob, tradeData);
+          }
+        }
+      }
+      
+      return { 
+        success: true, 
+        isRecording: this.isRecording,
+        message: this.isRecording ? 'Recording started' : 'Recording stopped'
+      };
+      
+    } catch (error) {
+      console.error('❌ Toggle recording error:', error);
+      this.isRecording = false;
+      chrome.action.setBadgeText({ text: '!' });
+      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
+      return { success: false, error: error.message };
+    }
+  }
+
   async handleAsyncMessage(message, sender) {
     switch (message.type) {
       case 'TRADE_OPENED':
         return await this.handleTradeOpened(message.data, sender.tab);
       case 'TRADE_CLOSED':
         return await this.handleTradeClosed(message.data, sender.tab);
+      case 'GET_TRADES':
+        return await this.handleGetTrades();
       default:
         return { success: false, error: `Unknown message type: ${message.type}` };
+    }
+  }
+
+  async handleGetTrades() {
+    try {
+      // Get current user session
+      const session = await chrome.storage.local.get('supabase_session');
+      if (!session.supabase_session) {
+        return { success: true, trades: [] };
+      }
+
+      const response = await fetch(`${this.supabaseUrl}/rest/v1/trade_replays?select=*&order=created_at.desc&limit=50`, {
+        headers: {
+          'Authorization': `Bearer ${session.supabase_session.access_token}`,
+          'apikey': this.supabaseKey,
+        }
+      });
+
+      if (response.ok) {
+        const trades = await response.json();
+        return { success: true, trades };
+      } else {
+        throw new Error('Failed to fetch trades');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching trades:', error);
+      return { success: false, error: error.message, trades: [] };
     }
   }
 
