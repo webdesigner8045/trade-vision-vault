@@ -175,7 +175,7 @@ class ExtensionBackground {
         return { success: true, isRecording: newStatus };
 
       case 'CAPTURE_SCREENSHOT':
-        const screenshot = await this.captureScreenshot(sender.tab?.id);
+        const screenshot = await this.captureScreenshot(sender.tab?.id, message.reason);
         return { success: !!screenshot, screenshot };
 
       case 'GET_TRADES':
@@ -189,7 +189,7 @@ class ExtensionBackground {
   }
 
   async handleTradeDetection(tradeData, tab) {
-    console.log('📈 Trade detected:', tradeData);
+    console.log('📈 Trade detected with data:', tradeData);
     
     try {
       const trades = await this.getStoredTrades();
@@ -204,14 +204,15 @@ class ExtensionBackground {
       trades.push(newTrade);
       await chrome.storage.local.set({ trades });
 
-      // Show notification
-      chrome.action.setBadgeText({ text: trades.length.toString() });
+      // Show notification with enhanced info
+      const badgeText = trades.length > 99 ? '99+' : trades.length.toString();
+      chrome.action.setBadgeText({ text: badgeText });
       chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
 
-      // Clear badge after 10 seconds
+      // Clear badge after 15 seconds
       setTimeout(() => {
         chrome.action.setBadgeText({ text: '' });
-      }, 10000);
+      }, 15000);
 
       console.log('✅ Trade captured and stored:', newTrade);
       
@@ -273,7 +274,7 @@ class ExtensionBackground {
     }
   }
 
-  async captureScreenshot(tabId) {
+  async captureScreenshot(tabId, reason = 'manual') {
     if (!tabId) {
       console.error('❌ No tab ID provided for screenshot');
       throw new Error('No tab ID provided');
@@ -284,33 +285,44 @@ class ExtensionBackground {
         throw new Error('Screenshot API not available');
       }
 
-      console.log(`📸 Capturing screenshot for tab ${tabId}`);
+      console.log(`📸 Capturing screenshot for tab ${tabId} (reason: ${reason})`);
       
       // Make sure the tab is active and visible
-      await chrome.tabs.update(tabId, { active: true });
-      
-      // Wait a moment for tab to become active
-      await new Promise(resolve => setTimeout(resolve, 100));
+      const tab = await chrome.tabs.get(tabId);
+      if (!tab.active) {
+        await chrome.tabs.update(tabId, { active: true });
+        // Wait longer for tab to become active when triggered by trade
+        await new Promise(resolve => setTimeout(resolve, reason === 'trade_detected' ? 500 : 100));
+      }
       
       const dataUrl = await chrome.tabs.captureVisibleTab({
         format: 'png',
-        quality: 80
+        quality: 90 // Higher quality for trade screenshots
       });
       
       if (!dataUrl) {
         throw new Error('Screenshot capture returned empty result');
       }
       
-      // Store the screenshot
+      // Store the screenshot with enhanced metadata
       const screenshots = await this.getStoredScreenshots();
       const newScreenshot = {
         id: `screenshot-${Date.now()}`,
         timestamp: new Date().toISOString(),
         dataUrl: dataUrl,
-        tabId: tabId
+        tabId: tabId,
+        reason: reason,
+        url: tab.url,
+        title: tab.title
       };
       
       screenshots.push(newScreenshot);
+      
+      // Keep only last 50 screenshots to manage storage
+      if (screenshots.length > 50) {
+        screenshots.splice(0, screenshots.length - 50);
+      }
+      
       await chrome.storage.local.set({ screenshots });
       
       console.log('✅ Screenshot captured and stored successfully');

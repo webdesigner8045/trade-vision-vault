@@ -1,4 +1,3 @@
-
 (function() {
   'use strict';
 
@@ -17,6 +16,10 @@
       this.platform = 'Tradovate';
       this.messageListenerActive = false;
       this.lastTradeTime = 0;
+      this.captureOptions = {
+        screenshots: true,
+        video: false // Video recording is complex, start with screenshots
+      };
       this.init();
     }
 
@@ -186,7 +189,7 @@
     setupTradeDetection() {
       console.log('🎯 Setting up enhanced trade detection...');
       
-      // Method 1: Click detection
+      // Method 1: Click detection with screenshot capture
       document.addEventListener('click', (event) => {
         if (!this.isRecording) return;
         
@@ -195,9 +198,8 @@
         
         if (button) {
           console.log('🎯 Trade button clicked:', button);
-          setTimeout(() => {
-            this.captureTradeClick(button, event);
-          }, 100);
+          // Capture screenshot immediately when trade button is clicked
+          this.captureTradeWithScreenshot(button, event, 'button_click');
         }
       }, true);
 
@@ -229,9 +231,7 @@
           const activeElement = document.activeElement;
           if (this.isTradeInputElement(activeElement)) {
             console.log('🎯 Enter pressed on trade form');
-            setTimeout(() => {
-              this.captureKeyboardTrade(activeElement);
-            }, 200);
+            this.captureTradeWithScreenshot(activeElement, event, 'keyboard_entry');
           }
         }
       });
@@ -279,7 +279,7 @@
           classes.includes('trade-success') || classes.includes('order-success')) {
         
         console.log('🎯 Trade confirmation detected:', element);
-        this.captureTradeConfirmation(element);
+        this.captureTradeWithScreenshot(element, null, 'confirmation_message');
       }
     }
 
@@ -290,7 +290,7 @@
       return !!parent;
     }
 
-    async captureTradeClick(button, event) {
+    async captureTradeWithScreenshot(element, event, triggerType) {
       const now = Date.now();
       if (now - this.lastTradeTime < 1000) {
         console.log('⏱️ Duplicate trade detection prevented');
@@ -299,86 +299,77 @@
       this.lastTradeTime = now;
 
       const timestamp = new Date();
-      const buttonText = button.textContent?.trim() || '';
-      const direction = this.determineDirection(buttonText, button);
+      const elementText = element.textContent?.trim() || '';
+      const direction = this.determineDirection(elementText, element);
       
-      console.log('📈 Capturing trade click:', {
-        button: buttonText,
+      console.log('📈 Capturing trade with screenshot:', {
+        element: elementText,
         direction,
-        platform: this.platform
+        platform: this.platform,
+        trigger: triggerType
       });
-      
-      const tradeData = {
-        id: `tradovate-${Date.now()}`,
-        platform: this.platform,
-        direction: direction,
-        trade_date: timestamp.toISOString().split('T')[0],
-        trade_time: timestamp.toTimeString().split(' ')[0],
-        trigger: 'button_click',
-        button_text: buttonText,
-        page_url: window.location.href,
-        timestamp: timestamp.toISOString(),
-        element_info: this.getElementInfo(button)
-      };
-      
-      await this.sendTradeData(tradeData);
-      this.showTradeNotification(tradeData);
-    }
 
-    async captureTradeConfirmation(element) {
-      const now = Date.now();
-      if (now - this.lastTradeTime < 2000) {
-        console.log('⏱️ Duplicate confirmation detection prevented');
-        return;
+      try {
+        // First, capture the screenshot
+        let screenshotUrl = null;
+        if (this.captureOptions.screenshots) {
+          console.log('📸 Requesting screenshot capture...');
+          const screenshotResponse = await this.sendMessage({ 
+            type: 'CAPTURE_SCREENSHOT',
+            reason: 'trade_detected'
+          });
+          
+          if (screenshotResponse?.success && screenshotResponse.screenshot) {
+            screenshotUrl = screenshotResponse.screenshot;
+            console.log('✅ Screenshot captured successfully');
+          } else {
+            console.warn('⚠️ Screenshot capture failed:', screenshotResponse);
+          }
+        }
+
+        // Create comprehensive trade data
+        const tradeData = {
+          id: `tradovate-${Date.now()}`,
+          platform: this.platform,
+          direction: direction,
+          trade_date: timestamp.toISOString().split('T')[0],
+          trade_time: timestamp.toTimeString().split(' ')[0],
+          trigger: triggerType,
+          element_text: elementText,
+          page_url: window.location.href,
+          timestamp: timestamp.toISOString(),
+          screenshot_url: screenshotUrl,
+          element_info: this.getElementInfo(element),
+          page_title: document.title
+        };
+        
+        // Send trade data to background
+        const tradeResponse = await this.sendTradeData(tradeData);
+        
+        if (tradeResponse) {
+          this.showTradeNotification(tradeData, !!screenshotUrl);
+        }
+        
+      } catch (error) {
+        console.error('❌ Error capturing trade with screenshot:', error);
+        // Still try to capture the trade without screenshot
+        const fallbackTradeData = {
+          id: `tradovate-fallback-${Date.now()}`,
+          platform: this.platform,
+          direction: direction,
+          trade_date: timestamp.toISOString().split('T')[0],
+          trade_time: timestamp.toTimeString().split(' ')[0],
+          trigger: triggerType,
+          element_text: elementText,
+          page_url: window.location.href,
+          timestamp: timestamp.toISOString(),
+          screenshot_url: null,
+          error: 'Screenshot capture failed'
+        };
+        
+        await this.sendTradeData(fallbackTradeData);
+        this.showTradeNotification(fallbackTradeData, false);
       }
-      this.lastTradeTime = now;
-
-      const timestamp = new Date();
-      const text = element.textContent?.trim() || '';
-      
-      console.log('📈 Capturing trade confirmation:', text);
-      
-      const tradeData = {
-        id: `tradovate-conf-${Date.now()}`,
-        platform: this.platform,
-        direction: this.determineDirectionFromText(text),
-        trade_date: timestamp.toISOString().split('T')[0],
-        trade_time: timestamp.toTimeString().split(' ')[0],
-        trigger: 'confirmation_message',
-        confirmation_text: text,
-        page_url: window.location.href,
-        timestamp: timestamp.toISOString()
-      };
-      
-      await this.sendTradeData(tradeData);
-      this.showTradeNotification(tradeData);
-    }
-
-    async captureKeyboardTrade(element) {
-      const now = Date.now();
-      if (now - this.lastTradeTime < 1000) {
-        console.log('⏱️ Duplicate keyboard trade detection prevented');
-        return;
-      }
-      this.lastTradeTime = now;
-
-      const timestamp = new Date();
-      
-      console.log('📈 Capturing keyboard trade entry');
-      
-      const tradeData = {
-        id: `tradovate-key-${Date.now()}`,
-        platform: this.platform,
-        direction: 'UNKNOWN',
-        trade_date: timestamp.toISOString().split('T')[0],
-        trade_time: timestamp.toTimeString().split(' ')[0],
-        trigger: 'keyboard_entry',
-        page_url: window.location.href,
-        timestamp: timestamp.toISOString()
-      };
-      
-      await this.sendTradeData(tradeData);
-      this.showTradeNotification(tradeData);
     }
 
     determineDirection(text, button) {
@@ -417,7 +408,7 @@
 
     async sendTradeData(tradeData) {
       try {
-        console.log('📤 Sending trade data to background:', tradeData);
+        console.log('📤 Sending comprehensive trade data to background:', tradeData);
         const response = await this.sendMessage({
           type: 'TRADE_DETECTED',
           data: tradeData
@@ -436,7 +427,7 @@
       }
     }
 
-    showTradeNotification(trade) {
+    showTradeNotification(trade, hasScreenshot) {
       const notification = document.createElement('div');
       notification.style.cssText = `
         position: fixed;
@@ -453,13 +444,14 @@
         box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
         transform: translateX(100%);
         transition: transform 0.3s ease;
-        max-width: 250px;
+        max-width: 280px;
       `;
       
       notification.innerHTML = `
         📈 Trade Captured!<br>
         <small>${trade.direction} • ${trade.trigger}</small><br>
-        <small>${trade.trade_time}</small>
+        <small>${trade.trade_time}</small><br>
+        ${hasScreenshot ? '<small>📸 Screenshot included</small>' : '<small>⚠️ Screenshot failed</small>'}
       `;
       
       document.body.appendChild(notification);
@@ -471,7 +463,7 @@
       setTimeout(() => {
         notification.style.transform = 'translateX(100%)';
         setTimeout(() => notification.remove(), 300);
-      }, 4000);
+      }, 5000); // Show longer notification for more info
     }
 
     async toggleRecording() {
