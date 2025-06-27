@@ -2,14 +2,15 @@
 {
   "manifest_version": 3,
   "name": "Replay Locker - Trade Capture",
-  "version": "2.0.1",
-  "description": "Automatically capture and sync trading data with comprehensive diagnostics",
+  "version": "2.1.0",
+  "description": "Automatically capture and sync trading data with video recording",
   "permissions": [
     "storage",
     "activeTab",
     "scripting",
     "tabs",
-    "notifications"
+    "notifications",
+    "tabCapture"
   ],
   "host_permissions": [
     "https://www.tradingview.com/*",
@@ -64,7 +65,7 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Replay Locker - Trade Capture v2.0"
+    "default_title": "Replay Locker - Video Trade Capture v2.1"
   },
   "icons": {
     "16": "icons/icon16.png",

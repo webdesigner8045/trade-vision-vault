@@ -1,9 +1,12 @@
-// Simplified background service worker with guaranteed message handling
+// Enhanced background service worker with video recording capabilities
 class ExtensionBackground {
   constructor() {
     this.injectedTabs = new Set();
     this.messageStats = { sent: 0, received: 0, errors: 0 };
     this.isReady = false;
+    this.activeRecordings = new Map(); // Map of tabId -> recording data
+    this.mediaRecorder = null;
+    this.recordedChunks = [];
     
     console.log('🚀 Background Script starting...');
     this.setupMessageListener();
@@ -167,16 +170,21 @@ class ExtensionBackground {
     console.log('🔄 Processing async message:', message.type);
     
     switch (message.type) {
-      case 'TRADE_DETECTED':
-        return await this.handleTradeDetection(message.data, sender.tab);
+      case 'TRADE_OPENED':
+        return await this.handleTradeOpened(message.data, sender.tab);
+
+      case 'TRADE_CLOSED':
+        return await this.handleTradeClosed(message.data, sender.tab);
 
       case 'TOGGLE_RECORDING':
         const newStatus = await this.toggleRecording(message.isRecording);
         return { success: true, isRecording: newStatus };
 
-      case 'CAPTURE_SCREENSHOT':
-        const screenshot = await this.captureScreenshot(sender.tab?.id, message.reason);
-        return { success: !!screenshot, screenshot };
+      case 'START_VIDEO_RECORDING':
+        return await this.startVideoRecording(sender.tab?.id);
+
+      case 'STOP_VIDEO_RECORDING':
+        return await this.stopVideoRecording(sender.tab?.id);
 
       case 'GET_TRADES':
         const trades = await this.getStoredTrades();
@@ -188,50 +196,287 @@ class ExtensionBackground {
     }
   }
 
-  async handleTradeDetection(tradeData, tab) {
-    console.log('📈 Trade detected with data:', tradeData);
+  async handleTradeOpened(tradeData, tab) {
+    console.log('📈 Trade opened, starting video recording:', tradeData);
     
     try {
+      const tabId = tab?.id;
+      if (!tabId) {
+        throw new Error('No tab ID available');
+      }
+
+      // Start video recording for this tab
+      const recordingResult = await this.startVideoRecording(tabId);
+      
+      if (!recordingResult.success) {
+        console.warn('⚠️ Failed to start video recording:', recordingResult.error);
+      }
+
+      // Store trade data with recording info
       const trades = await this.getStoredTrades();
       const newTrade = {
-        id: tradeData.id || Date.now().toString(),
+        id: tradeData.id || `trade-${Date.now()}`,
         timestamp: new Date().toISOString(),
         url: tab?.url || 'unknown',
         tab_title: tab?.title || 'unknown',
+        recording_started: recordingResult.success,
+        recording_id: recordingResult.recordingId,
+        status: 'open',
         ...tradeData
       };
       
       trades.push(newTrade);
       await chrome.storage.local.set({ trades });
 
-      // Show notification with enhanced info
-      const badgeText = trades.length > 99 ? '99+' : trades.length.toString();
-      chrome.action.setBadgeText({ text: badgeText });
-      chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
+      // Update badge
+      chrome.action.setBadgeText({ text: 'REC' });
+      chrome.action.setBadgeBackgroundColor({ color: '#dc2626' });
 
-      // Clear badge after 15 seconds
-      setTimeout(() => {
-        chrome.action.setBadgeText({ text: '' });
-      }, 15000);
+      console.log('✅ Trade opened and recording started:', newTrade);
+      return { success: true, trade: newTrade, recording: recordingResult.success };
 
-      console.log('✅ Trade captured and stored:', newTrade);
-      
-      // Notify popup if it's open
-      try {
-        chrome.runtime.sendMessage({
-          type: 'TRADE_UPDATED',
-          trade: newTrade,
-          totalTrades: trades.length
-        });
-      } catch (error) {
-        // Popup might not be open, that's okay
-        console.log('Popup not available for notification');
+    } catch (error) {
+      console.error('❌ Error handling trade opened:', error);
+      throw error;
+    }
+  }
+
+  async handleTradeClosed(tradeData, tab) {
+    console.log('🔚 Trade closed, stopping video recording:', tradeData);
+    
+    try {
+      const tabId = tab?.id;
+      if (!tabId) {
+        throw new Error('No tab ID available');
       }
 
-      return { success: true, trade: newTrade };
+      // Stop video recording for this tab
+      const recordingResult = await this.stopVideoRecording(tabId);
+      
+      // Update trade status
+      const trades = await this.getStoredTrades();
+      const tradeIndex = trades.findIndex(t => t.id === tradeData.id);
+      
+      if (tradeIndex !== -1) {
+        trades[tradeIndex] = {
+          ...trades[tradeIndex],
+          status: 'closed',
+          closed_at: new Date().toISOString(),
+          video_url: recordingResult.videoUrl,
+          recording_duration: recordingResult.duration,
+          ...tradeData
+        };
+        
+        await chrome.storage.local.set({ trades });
+        console.log('✅ Trade updated with video:', trades[tradeIndex]);
+      }
+
+      // Clear badge if no active recordings
+      if (this.activeRecordings.size === 0) {
+        chrome.action.setBadgeText({ text: '' });
+      }
+
+      return { success: true, trade: trades[tradeIndex], video: recordingResult.success };
+
     } catch (error) {
-      console.error('❌ Error handling trade detection:', error);
+      console.error('❌ Error handling trade closed:', error);
       throw error;
+    }
+  }
+
+  async startVideoRecording(tabId) {
+    console.log(`🎥 Starting video recording for tab ${tabId}`);
+    
+    try {
+      if (!tabId) {
+        throw new Error('No tab ID provided');
+      }
+
+      // Check if already recording for this tab
+      if (this.activeRecordings.has(tabId)) {
+        console.log('⚠️ Already recording for this tab');
+        return { success: true, recordingId: this.activeRecordings.get(tabId).id };
+      }
+
+      // Make sure tab is active for recording
+      await chrome.tabs.update(tabId, { active: true });
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Start screen recording using chrome.tabCapture
+      const stream = await chrome.tabCapture.capture({
+        audio: true,
+        video: true,
+        audioConstraints: {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            echoCancellation: true
+          }
+        },
+        videoConstraints: {
+          mandatory: {
+            chromeMediaSource: 'tab',
+            maxWidth: 1920,
+            maxHeight: 1080,
+            maxFrameRate: 30
+          }
+        }
+      });
+
+      if (!stream) {
+        throw new Error('Failed to capture tab stream');
+      }
+
+      // Create MediaRecorder
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9'
+      });
+
+      const recordingId = `recording-${tabId}-${Date.now()}`;
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        console.log('🎥 Recording stopped, processing video...');
+        
+        try {
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const videoUrl = await this.saveVideoToStorage(blob, recordingId);
+          
+          // Update recording data
+          const recording = this.activeRecordings.get(tabId);
+          if (recording) {
+            recording.videoUrl = videoUrl;
+            recording.endTime = Date.now();
+            recording.duration = recording.endTime - recording.startTime;
+          }
+          
+          console.log('✅ Video saved successfully:', videoUrl);
+        } catch (error) {
+          console.error('❌ Error saving video:', error);
+        }
+        
+        // Clean up
+        stream.getTracks().forEach(track => track.stop());
+        this.activeRecordings.delete(tabId);
+      };
+
+      mediaRecorder.onerror = (error) => {
+        console.error('❌ MediaRecorder error:', error);
+        this.activeRecordings.delete(tabId);
+      };
+
+      // Start recording
+      mediaRecorder.start(1000); // Collect data every second
+
+      // Store recording info
+      this.activeRecordings.set(tabId, {
+        id: recordingId,
+        mediaRecorder,
+        stream,
+        chunks,
+        startTime: Date.now(),
+        tabId
+      });
+
+      console.log('✅ Video recording started successfully');
+      return { success: true, recordingId };
+
+    } catch (error) {
+      console.error('❌ Error starting video recording:', error);
+      
+      if (error.message.includes('not available')) {
+        return { success: false, error: 'Screen recording not available - missing permissions' };
+      } else if (error.message.includes('denied')) {
+        return { success: false, error: 'Screen recording permission denied' };
+      } else {
+        return { success: false, error: `Recording failed: ${error.message}` };
+      }
+    }
+  }
+
+  async stopVideoRecording(tabId) {
+    console.log(`🛑 Stopping video recording for tab ${tabId}`);
+    
+    try {
+      const recording = this.activeRecordings.get(tabId);
+      
+      if (!recording) {
+        console.log('⚠️ No active recording found for this tab');
+        return { success: false, error: 'No active recording' };
+      }
+
+      // Stop the MediaRecorder
+      if (recording.mediaRecorder && recording.mediaRecorder.state === 'recording') {
+        recording.mediaRecorder.stop();
+      }
+
+      // Wait a moment for the stop event to process
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const duration = recording.endTime ? recording.endTime - recording.startTime : Date.now() - recording.startTime;
+      
+      console.log('✅ Video recording stopped successfully');
+      return { 
+        success: true, 
+        videoUrl: recording.videoUrl,
+        duration: Math.round(duration / 1000) // Convert to seconds
+      };
+
+    } catch (error) {
+      console.error('❌ Error stopping video recording:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async saveVideoToStorage(blob, recordingId) {
+    try {
+      // Convert blob to base64
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+
+      // Store in chrome.storage.local (note: this has size limits)
+      const videos = await this.getStoredVideos();
+      const videoData = {
+        id: recordingId,
+        timestamp: new Date().toISOString(),
+        data: base64,
+        size: blob.size,
+        type: blob.type
+      };
+
+      videos.push(videoData);
+
+      // Keep only last 10 videos to manage storage
+      if (videos.length > 10) {
+        videos.splice(0, videos.length - 10);
+      }
+
+      await chrome.storage.local.set({ videos });
+      
+      console.log('💾 Video saved to storage:', recordingId);
+      return `storage://${recordingId}`;
+
+    } catch (error) {
+      console.error('❌ Error saving video to storage:', error);
+      throw error;
+    }
+  }
+
+  async getStoredVideos() {
+    try {
+      const result = await chrome.storage.local.get('videos');
+      return result.videos || [];
+    } catch (error) {
+      console.error('❌ Error getting stored videos:', error);
+      return [];
     }
   }
 

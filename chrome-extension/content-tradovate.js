@@ -17,10 +17,8 @@
       this.messageListenerActive = false;
       this.lastTradeTime = 0;
       this.debugMode = true;
-      this.captureOptions = {
-        screenshots: true,
-        video: false
-      };
+      this.activeTrades = new Map(); // Track open trades
+      this.tradeStates = new Map(); // Track trade states for video recording
       this.init();
     }
 
@@ -32,12 +30,10 @@
         await this.registerWithBackground();
         await this.getRecordingStatus();
         this.setupUI();
-        this.setupTradeDetection();
+        this.setupAdvancedTradeDetection();
         
         console.log('✅ Tradovate capture initialized successfully');
-        
-        // Show initialization success
-        this.showNotification('Replay Locker initialized and ready to capture trades!', 'success');
+        this.showNotification('Replay Locker initialized and ready for video recording!', 'success');
         
       } catch (error) {
         console.error('❌ Failed to initialize Tradovate capture:', error);
@@ -225,10 +221,10 @@
       `;
     }
 
-    setupTradeDetection() {
-      console.log('🎯 Setting up enhanced trade detection...');
+    setupAdvancedTradeDetection() {
+      console.log('🎯 Setting up advanced trade detection for video recording...');
       
-      // Method 1: Enhanced click detection
+      // Method 1: Enhanced click detection with trade state tracking
       document.addEventListener('click', (event) => {
         if (!this.isRecording) return;
         
@@ -239,22 +235,17 @@
         
         if (button) {
           console.log('🎯 Trade button identified:', button);
-          this.captureTradeWithScreenshot(button, event, 'button_click');
+          this.handleTradeAction(button, event, 'button_click');
         }
       }, true);
 
-      // Method 2: Form submission detection
-      document.addEventListener('submit', (event) => {
+      // Method 2: Position monitoring for trade closure detection
+      setInterval(() => {
         if (!this.isRecording) return;
-        
-        const form = event.target;
-        if (this.isTradeForm(form)) {
-          console.log('🎯 Trade form submitted:', form);
-          this.captureTradeWithScreenshot(form, event, 'form_submit');
-        }
-      }, true);
+        this.monitorPositions();
+      }, 2000);
 
-      // Method 3: DOM changes detection
+      // Method 3: DOM mutation observer for trade confirmations
       const observer = new MutationObserver((mutations) => {
         if (!this.isRecording) return;
         
@@ -262,7 +253,7 @@
           if (mutation.type === 'childList') {
             mutation.addedNodes.forEach((node) => {
               if (node.nodeType === Node.ELEMENT_NODE) {
-                this.checkForTradeElements(node);
+                this.checkForTradeStateChanges(node);
               }
             });
           }
@@ -274,7 +265,7 @@
         subtree: true
       });
 
-      // Method 4: Keyboard detection
+      // Method 4: Enhanced keyboard detection
       document.addEventListener('keydown', (event) => {
         if (!this.isRecording) return;
         
@@ -282,32 +273,40 @@
           const activeElement = document.activeElement;
           if (this.isTradeInputElement(activeElement)) {
             console.log('🎯 Enter pressed on trade input');
-            this.captureTradeWithScreenshot(activeElement, event, 'keyboard_entry');
+            this.handleTradeAction(activeElement, event, 'keyboard_entry');
           }
         }
       });
 
-      // Method 5: Test button for manual testing
-      this.createTestButton();
+      // Method 5: Test buttons for manual testing
+      this.createTestButtons();
       
-      console.log('✅ All trade detection methods setup complete');
+      console.log('✅ Advanced trade detection setup complete');
     }
 
-    createTestButton() {
-      const existing = document.getElementById('tradovate-test-button');
-      if (existing) {
-        existing.remove();
+    createTestButtons() {
+      const existingContainer = document.getElementById('tradovate-test-container');
+      if (existingContainer) {
+        existingContainer.remove();
       }
 
-      const testBtn = document.createElement('button');
-      testBtn.id = 'tradovate-test-button';
-      testBtn.textContent = 'Test Trade Capture';
-      testBtn.style.cssText = `
+      const container = document.createElement('div');
+      container.id = 'tradovate-test-container';
+      container.style.cssText = `
         position: fixed;
         bottom: 10px;
         right: 10px;
         z-index: 999999;
-        background: #f59e0b;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      `;
+
+      // Test trade open button
+      const openBtn = document.createElement('button');
+      openBtn.textContent = 'Test Trade Open';
+      openBtn.style.cssText = `
+        background: #10b981;
         color: white;
         padding: 8px 12px;
         border: none;
@@ -315,14 +314,267 @@
         font-size: 12px;
         cursor: pointer;
       `;
-
-      testBtn.addEventListener('click', () => {
-        console.log('🧪 Test button clicked');
-        this.captureTradeWithScreenshot(testBtn, null, 'test_button');
+      openBtn.addEventListener('click', () => {
+        console.log('🧪 Test trade open clicked');
+        this.simulateTradeOpen();
       });
 
-      document.body.appendChild(testBtn);
-      console.log('✅ Test button created');
+      // Test trade close button
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = 'Test Trade Close';
+      closeBtn.style.cssText = `
+        background: #dc2626;
+        color: white;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 4px;
+        font-size: 12px;
+        cursor: pointer;
+      `;
+      closeBtn.addEventListener('click', () => {
+        console.log('🧪 Test trade close clicked');
+        this.simulateTradeClose();
+      });
+
+      container.appendChild(openBtn);
+      container.appendChild(closeBtn);
+      document.body.appendChild(container);
+      
+      console.log('✅ Test buttons created');
+    }
+
+    async simulateTradeOpen() {
+      const tradeData = {
+        id: `test-trade-${Date.now()}`,
+        instrument: 'ES',
+        direction: 'BUY',
+        price: 4500,
+        quantity: 1,
+        type: 'market'
+      };
+      
+      await this.handleTradeOpened(tradeData);
+    }
+
+    async simulateTradeClose() {
+      // Find the most recent open trade
+      const openTrades = Array.from(this.activeTrades.values());
+      if (openTrades.length > 0) {
+        const trade = openTrades[0];
+        await this.handleTradeClosed({
+          ...trade,
+          exit_price: trade.price + (Math.random() > 0.5 ? 10 : -10),
+          pnl: (Math.random() > 0.5 ? 100 : -50)
+        });
+      } else {
+        this.showNotification('No open trades to close', 'warning');
+      }
+    }
+
+    async handleTradeAction(element, event, triggerType) {
+      const now = Date.now();
+      if (now - this.lastTradeTime < 2000) {
+        console.log('⏱️ Duplicate trade detection prevented');
+        return;
+      }
+      this.lastTradeTime = now;
+
+      const elementText = element.textContent?.trim() || '';
+      const direction = this.determineDirection(elementText, element);
+      const actionType = this.determineActionType(elementText, element);
+      
+      console.log('📈 Trade action detected:', {
+        element: elementText,
+        direction,
+        actionType,
+        trigger: triggerType
+      });
+
+      if (actionType === 'open') {
+        await this.handleTradeOpened({
+          id: `trade-${Date.now()}`,
+          direction,
+          element_text: elementText,
+          trigger: triggerType
+        });
+      } else if (actionType === 'close') {
+        await this.handleTradeClosed({
+          direction,
+          element_text: elementText,
+          trigger: triggerType
+        });
+      }
+    }
+
+    determineActionType(text, element) {
+      const combined = (text + ' ' + (element.className || '')).toLowerCase();
+      
+      if (combined.includes('close') || combined.includes('exit') || combined.includes('flatten')) {
+        return 'close';
+      } else if (combined.includes('buy') || combined.includes('sell') || combined.includes('long') || combined.includes('short')) {
+        return 'open';
+      }
+      
+      return 'open'; // Default to open
+    }
+
+    async handleTradeOpened(tradeData) {
+      console.log('📈 Trade opened - starting video recording:', tradeData);
+      
+      try {
+        // Store trade locally
+        this.activeTrades.set(tradeData.id, {
+          ...tradeData,
+          opened_at: new Date().toISOString(),
+          status: 'open'
+        });
+
+        // Notify background to start video recording
+        const response = await this.sendMessage({
+          type: 'TRADE_OPENED',
+          data: tradeData
+        });
+
+        if (response?.success) {
+          this.showTradeNotification(`Trade opened: ${tradeData.direction}`, 'Video recording started', 'success');
+          this.updateTradeIndicator();
+        } else {
+          console.error('❌ Failed to start recording:', response);
+          this.showTradeNotification(`Trade opened: ${tradeData.direction}`, 'Recording failed to start', 'warning');
+        }
+
+      } catch (error) {
+        console.error('❌ Error handling trade opened:', error);
+        this.showTradeNotification('Trade opened', 'Error starting recording', 'error');
+      }
+    }
+
+    async handleTradeClosed(tradeData) {
+      console.log('🔚 Trade closed - stopping video recording:', tradeData);
+      
+      try {
+        // Find and update the trade
+        let closedTrade = null;
+        for (const [id, trade] of this.activeTrades.entries()) {
+          if (trade.direction === tradeData.direction || tradeData.id === id) {
+            closedTrade = { ...trade, ...tradeData };
+            this.activeTrades.delete(id);
+            break;
+          }
+        }
+
+        if (!closedTrade) {
+          // Create a new trade record if we couldn't find the opening
+          closedTrade = {
+            id: `trade-${Date.now()}`,
+            ...tradeData,
+            status: 'closed'
+          };
+        }
+
+        // Notify background to stop video recording
+        const response = await this.sendMessage({
+          type: 'TRADE_CLOSED',
+          data: closedTrade
+        });
+
+        if (response?.success) {
+          this.showTradeNotification(`Trade closed: ${closedTrade.direction}`, 'Video recording saved', 'success');
+          this.updateTradeIndicator();
+        } else {
+          console.error('❌ Failed to stop recording:', response);
+          this.showTradeNotification(`Trade closed: ${closedTrade.direction}`, 'Recording failed to save', 'warning');
+        }
+
+      } catch (error) {
+        console.error('❌ Error handling trade closed:', error);
+        this.showTradeNotification('Trade closed', 'Error stopping recording', 'error');
+      }
+    }
+
+    monitorPositions() {
+      // Look for position displays or P&L indicators
+      const positionElements = document.querySelectorAll('[data-qa*="position"], .position, .pnl, [class*="position"]');
+      
+      positionElements.forEach(element => {
+        const text = element.textContent?.toLowerCase() || '';
+        
+        // Check for position changes that might indicate trade closure
+        if (text.includes('flat') || text.includes('0') || text.includes('closed')) {
+          console.log('📊 Position change detected:', text);
+          // This could indicate a trade closure
+        }
+      });
+    }
+
+    checkForTradeStateChanges(element) {
+      const text = element.textContent?.toLowerCase() || '';
+      const classes = element.className?.toLowerCase() || '';
+      
+      // Check for trade confirmations
+      if (text.includes('order filled') || text.includes('trade executed') ||
+          text.includes('position opened') || text.includes('order confirmed')) {
+        console.log('🎯 Trade confirmation detected:', element);
+        // This indicates a trade was opened
+      }
+      
+      // Check for trade closures
+      if (text.includes('position closed') || text.includes('trade closed') ||
+          text.includes('order closed') || classes.includes('closed')) {
+        console.log('🎯 Trade closure detected:', element);
+        // This indicates a trade was closed
+      }
+    }
+
+    updateTradeIndicator() {
+      const openTradeCount = this.activeTrades.size;
+      const indicator = document.getElementById('tradovate-recording-indicator');
+      
+      if (indicator) {
+        const baseText = this.isRecording ? 'Recording' : 'Paused';
+        indicator.innerHTML = `
+          <span style="display: inline-block; width: 8px; height: 8px; background: white; border-radius: 50%; margin-right: 6px; ${this.isRecording ? 'animation: pulse 1s infinite;' : ''}"></span>
+          ${baseText} | ${this.platform} | ${openTradeCount} active
+        `;
+      }
+    }
+
+    showTradeNotification(title, subtitle, type = 'info') {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 10px;
+        z-index: 999999;
+        background: ${type === 'success' ? '#10b981' : type === 'error' ? '#dc2626' : type === 'warning' ? '#f59e0b' : '#3b82f6'};
+        color: white;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        font-family: Arial, sans-serif;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        max-width: 280px;
+      `;
+      
+      notification.innerHTML = `
+        🎥 ${title}<br>
+        <small>${subtitle}</small><br>
+        <small>${new Date().toLocaleTimeString()}</small>
+      `;
+      
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(0)';
+      }, 100);
+      
+      setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => notification.remove(), 300);
+      }, 5000);
     }
 
     findTradeButton(element) {
@@ -388,7 +640,7 @@
 
     async captureTradeWithScreenshot(element, event, triggerType) {
       const now = Date.now();
-      if (now - this.lastTradeTime < 2000) { // Increased debounce to 2 seconds
+      if (now - this.lastTradeTime < 2000) {
         console.log('⏱️ Duplicate trade detection prevented');
         return;
       }
@@ -650,6 +902,6 @@
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initCapture);
   } else {
-    setTimeout(initCapture, 1000); // Increased delay to ensure page is fully loaded
+    setTimeout(initCapture, 1000);
   }
 })();
